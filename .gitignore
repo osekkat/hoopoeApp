@@ -1,0 +1,35 @@
+# bv (beads viewer) local config and caches
+.bv/
+
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+Hoopoe.xcodeproj/project.xcworkspace/xcuserdata/
+Hoopoe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
+Hoopoe.xcodeproj/xcuserdata/
+
+# Build artifacts
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/
+Package.resolved
+
+# Rust (future Phase 2+)
+hoopoe-engine/target/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# MCP Agent Mail local storage
+storage.sqlite3
+storage.sqlite3-shm
+storage.sqlite3-wal
