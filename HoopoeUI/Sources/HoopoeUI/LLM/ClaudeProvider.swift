@@ -63,7 +63,7 @@ public struct ClaudeProvider: LLMProvider, Sendable {
             let task = Task {
                 do {
                     let startTime = Date()
-                    var request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
+                    let request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
 
                     if stream {
                         try await streamResponse(request: request, model: model, startTime: startTime, continuation: continuation)
@@ -85,7 +85,7 @@ public struct ClaudeProvider: LLMProvider, Sendable {
     // MARK: - Request Construction
 
     private func makeRequest(prompt: String, model: String, system: String?, stream: Bool) -> URLRequest {
-        let url = baseURL.appendingPathComponent("/v1/messages")
+        let url = baseURL.appendingPathComponent("v1/messages")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")

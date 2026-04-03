@@ -4,7 +4,10 @@ import Foundation
 /// Color and font theme for markdown syntax highlighting.
 ///
 /// Uses semantic NSColor values so the theme adapts to light/dark mode automatically.
-public struct MarkdownTheme: Sendable {
+/// - Note: Marked `@unchecked Sendable` because `NSColor` and `NSFont` are
+///   not formally `Sendable`, but instances are effectively immutable after
+///   construction and safe to share across isolation boundaries.
+public struct MarkdownTheme: @unchecked Sendable {
     public let headingColors: [NSColor]
     public let bodyFont: NSFont
     public let headingFonts: [NSFont]

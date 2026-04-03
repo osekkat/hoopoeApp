@@ -11,8 +11,8 @@ struct HoopoeCommands: Commands {
             .keyboardShortcut("o")
         }
 
-        // View menu
-        CommandMenu("View") {
+        // Add to existing View menu (not CommandMenu, which creates a duplicate)
+        CommandGroup(after: .toolbar) {
             Button("Toggle Sidebar") {
                 NSApp.keyWindow?.firstResponder?.tryToPerform(
                     #selector(NSSplitViewController.toggleSidebar(_:)),

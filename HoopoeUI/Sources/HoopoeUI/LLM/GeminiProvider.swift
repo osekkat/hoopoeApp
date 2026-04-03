@@ -73,7 +73,7 @@ public struct GeminiProvider: LLMProvider, Sendable {
     // MARK: - Request Construction
 
     private func makeRequest(prompt: String, model: String, system: String?) -> URLRequest {
-        let url = baseURL.appendingPathComponent("/v1beta/models/\(model):generateContent")
+        let url = baseURL.appendingPathComponent("v1beta/models/\(model):generateContent")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
 
@@ -96,7 +96,7 @@ public struct GeminiProvider: LLMProvider, Sendable {
     }
 
     private func makeStreamRequest(prompt: String, model: String, system: String?) -> URLRequest {
-        let url = baseURL.appendingPathComponent("/v1beta/models/\(model):streamGenerateContent")
+        let url = baseURL.appendingPathComponent("v1beta/models/\(model):streamGenerateContent")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "key", value: apiKey),

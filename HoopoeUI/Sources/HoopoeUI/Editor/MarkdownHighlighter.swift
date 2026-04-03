@@ -88,17 +88,24 @@ public final class MarkdownHighlighter {
         text: String
     ) {
         let nodeType = node.nodeType ?? ""
-        let range = NSRange(
-            location: Int(node.startByte),
-            length: Int(node.endByte - node.startByte)
-        )
 
-        // Clamp range to valid bounds
-        let safeRange = NSRange(
-            location: min(range.location, attributed.length),
-            length: min(range.length, attributed.length - min(range.location, attributed.length))
-        )
-        guard safeRange.length > 0 else { return }
+        // Convert byte offsets to String.Index, then to NSRange (UTF-16 units).
+        // TreeSitter reports byte offsets (UTF-8), but NSAttributedString uses
+        // UTF-16 code unit offsets. Mixing them up corrupts ranges for non-ASCII text.
+        let utf8 = text.utf8
+        let startByte = Int(node.startByte)
+        let endByte = Int(node.endByte)
+
+        guard startByte <= utf8.count, endByte <= utf8.count, startByte < endByte else { return }
+
+        // Use UTF-8 byte offsets to find String.Index
+        guard let startStringIdx = text.utf8.index(text.utf8.startIndex, offsetBy: startByte, limitedBy: text.utf8.endIndex),
+              let endStringIdx = text.utf8.index(text.utf8.startIndex, offsetBy: endByte, limitedBy: text.utf8.endIndex)
+        else { return }
+
+        let swiftRange = startStringIdx..<endStringIdx
+        let safeRange = NSRange(swiftRange, in: text)
+        guard safeRange.length > 0, safeRange.location + safeRange.length <= attributed.length else { return }
 
         switch nodeType {
         case "atx_heading":
