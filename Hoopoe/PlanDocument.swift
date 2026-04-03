@@ -122,6 +122,7 @@ struct PlanVersion: Identifiable, Codable, Sendable, Hashable {
     let createdAt: Date
     let roundNumber: Int
     let changeDescription: String
+    let provenance: VersionProvenance?
 
     init(
         id: UUID = UUID(),
@@ -129,7 +130,8 @@ struct PlanVersion: Identifiable, Codable, Sendable, Hashable {
         content: String,
         createdAt: Date = Date(),
         roundNumber: Int,
-        changeDescription: String
+        changeDescription: String,
+        provenance: VersionProvenance? = nil
     ) {
         self.id = id
         self.planId = planId
@@ -137,6 +139,22 @@ struct PlanVersion: Identifiable, Codable, Sendable, Hashable {
         self.createdAt = createdAt
         self.roundNumber = roundNumber
         self.changeDescription = changeDescription
+        self.provenance = provenance
+    }
+}
+
+// MARK: - Version Provenance
+
+/// Tracks which LLM model produced a version and the operation type.
+struct VersionProvenance: Codable, Sendable, Hashable {
+    let modelName: String
+    let promptType: PromptType
+
+    enum PromptType: String, Codable, Sendable, Hashable {
+        case generation
+        case refinement
+        case synthesis
+        case manual
     }
 }
 

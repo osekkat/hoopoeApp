@@ -18,6 +18,7 @@
 		089C16B9293B2C5F00A1B2C3 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AA293B2C5F00A1B2C3 /* AppSettings.swift */; };
 		089C16BA293B2C5F00A1B2C3 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AB293B2C5F00A1B2C3 /* SettingsView.swift */; };
 		089C16BB293B2C5F00A1B2C3 /* PlanStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */; };
+		089C16BC293B2C5F00A1B2C3 /* PlanVersionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		089C16AA293B2C5F00A1B2C3 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		089C16AB293B2C5F00A1B2C3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStore.swift; sourceTree = "<group>"; };
+		089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanVersionManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +66,8 @@
 				089C16A9293B2C5F00A1B2C3 /* PlanDocument.swift */,
 				089C16AA293B2C5F00A1B2C3 /* AppSettings.swift */,
 				089C16AB293B2C5F00A1B2C3 /* SettingsView.swift */,
+				089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */,
+				089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */,
 				089C16A5293B2C5F00A1B2C3 /* Assets.xcassets */,
 				089C16A2293B2C5F00A1B2C3 /* Hoopoe.entitlements */,
 				089C16A7293B2C5F00A1B2C3 /* Preview Content */,
@@ -171,6 +175,8 @@
 				089C16B8293B2C5F00A1B2C3 /* PlanDocument.swift in Sources */,
 				089C16B9293B2C5F00A1B2C3 /* AppSettings.swift in Sources */,
 				089C16BA293B2C5F00A1B2C3 /* SettingsView.swift in Sources */,
+				089C16BB293B2C5F00A1B2C3 /* PlanStore.swift in Sources */,
+				089C16BC293B2C5F00A1B2C3 /* PlanVersionManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
