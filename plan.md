@@ -71,6 +71,12 @@ Hoopoe.app
 │   │   ├── claude/
 │   │   │   ├── protocol.rs       # WebSocket/JSON-RPC control protocol
 │   │   │   ├── types.rs          # Message types, options, hooks
+│   │   │   ├── fork_session.rs   # Session fork: spawns a disposable Claude session
+│   │   │   │                     #   via `claude -p "<prompt>" --fork-session <id>`.
+│   │   │   │                     #   Used for one-shot operations (organized commits,
+│   │   │   │                     #   status reports, review prompts) without
+│   │   │   │                     #   interrupting the agent's main conversation.
+│   │   │   │                     #   Fork output streams into the engine event log.
 │   │   │   └── sdk_adapter.rs    # Rust adapter wrapping the Claude Agent SDK (Python)
 │   │   │                         #   as a Tokio-managed subprocess. Primary integration
 │   │   │                         #   path. Future: port to native Rust when justified.
@@ -83,6 +89,12 @@ Hoopoe.app
 │   │   ├── beads_manager.rs      # br (beads_rust) integration
 │   │   ├── beads_viewer.rs       # bv (beads_viewer) graph analysis
 │   │   ├── file_reservation.rs   # Advisory file locking
+│   │   ├── context_dir.rs        # .context/ shared knowledge directory: populates
+│   │   │                         #   plan summary, bead manifest, and architectural
+│   │   │                         #   context as Markdown files that all agents can
+│   │   │                         #   read without MCP/API. Auto-populated at phase
+│   │   │                         #   transitions; agents append decisions and notes
+│   │   │                         #   during execution. Git-tracked for versioning.
 │   │   └── agentsmd_gen.rs       # Auto-generates AGENTS.md
 │   │
 │   ├── src/planning/             # Plan creation & management
@@ -320,6 +332,8 @@ The plan editor is markdown-first, but every save compiles the markdown into a t
 
 The user presses "Convert to Beads." Hoopoe sends the plan to Claude Code (via the Agent SDK) with the standard conversion prompt from the Flywheel guide, instrumented with structured output to capture beads in JSON format. The conversion runs in a visible agent session — the user can watch the agent work in real time.
 
+On successful conversion, the engine auto-populates the project's `.context/` directory (see Section 5.10) with `plan-summary.md` (condensed plan with stable section IDs) and `beads-manifest.md` (all beads with IDs, titles, dependencies, and acceptance criteria). These files give every agent immediate filesystem access to the full project context without requiring MCP calls or Agent Mail queries.
+
 #### 3.2.2 Bead Visualization
 
 Once conversion completes, beads are displayed in three synchronized views:
@@ -369,21 +383,24 @@ Hoopoe implements adaptive ramp-up based on provider quota, machine load, and re
 
 1. If resuming, restore from the latest swarm checkpoint (agent assignments, bead state, budget). Check for surviving tmux sessions on the `-L hoopoe` socket and reattach.
 2. Start Agent Mail MCP server
-3. Generate per-agent AGENTS.md files
-4. Spawn new agents in staggered order via `tmux new-session -A` on the `-L hoopoe` socket
-5. Send marching orders prompt to each agent (the standard prompt from the Flywheel guide)
-6. Monitor for registration in Agent Mail
-7. Verify each agent has chosen a bead via bv
-8. Create "post-launch" checkpoint
+3. Refresh `.context/` directory: regenerate `plan-summary.md`, `beads-manifest.md`, and `architecture-context.md` from current engine state (see Section 5.10)
+4. Generate per-agent AGENTS.md files (referencing `.context/` for shared knowledge)
+5. Spawn new agents in staggered order via `tmux new-session -A` on the `-L hoopoe` socket
+6. Send marching orders prompt to each agent (the standard prompt from the Flywheel guide)
+7. Monitor for registration in Agent Mail
+8. Verify each agent has chosen a bead via bv
+9. Create "post-launch" checkpoint
 
 #### 3.3.4 Operator Automation
 
-Hoopoe automates the human machine-tending tasks described in the Flywheel guide:
+Hoopoe automates the human machine-tending tasks described in the Flywheel guide. Where possible, operational tasks run as **session forks** (see Section 4.4.2) — disposable copies of the agent's session that execute one-shot prompts without interrupting the agent's main conversation context. This means the agent keeps working on its current bead while Hoopoe handles housekeeping in parallel.
 
 - **Auto-compaction recovery**: When an agent's context is compacted (detected via session monitoring), Hoopoe automatically sends "Reread AGENTS.md."
 - **Auto-bead-status updates**: When an agent starts writing code for a bead, the bead status is updated to "in_progress." When the agent commits, the bead is marked for review.
-- **Periodic review triggers**: Every 30 minutes, Hoopoe picks the agent that most recently finished a bead and sends the "fresh eyes" review prompt.
-- **Organized commits**: Every 2 hours, one agent is designated for the organized commits prompt.
+- **Periodic review triggers**: Every 30 minutes, Hoopoe picks the agent that most recently finished a bead and **forks its session** to run the "fresh eyes" review prompt. The fork inherits full conversation context, so the review is well-informed, but the main session is not paused. Fork output is captured and surfaced as review findings in the Hardening phase.
+- **Organized commits**: Every 2 hours, one agent's session is **forked** for the organized commits prompt. The fork reads the working tree, creates structured commits, and exits — the main agent never sees the interruption.
+- **Reality check forks**: The "One-Click Reality Check" (Section 5.6) uses session forks to collect status from all agents simultaneously without pausing any of them.
+- **`.context/` refresh**: After each bead completion, the engine regenerates `beads-manifest.md` in `.context/` with updated statuses, ensuring all agents have current project state on their next AGENTS.md reread.
 - **Rate limit rotation**: When rate limits are detected, Hoopoe automatically switches to backup API keys/accounts.
 - **Lease expiry and stalled-run detection**: Every run carries a TTL and emits periodic heartbeats. When heartbeats are missing or the lease expires without progress, the scheduler automatically requeues the bead to another agent, escalates to the user, or routes to the dead-letter queue — depending on retry count and last-known workspace state. This replaces fixed-timer heuristics with a principled supervision model.
 
@@ -548,6 +565,15 @@ impl AgentProcess {
     pub fn stream_terminal(&mut self) -> impl Stream<Item = Vec<u8>> { ... }  // raw PTY bytes for GhosttyTerminal
     pub async fn terminate(&mut self) -> Result<()> { ... }
     pub async fn is_alive(&self) -> bool { ... }  // direct process status check
+
+    /// Fork this agent's session for a one-shot operation (Claude only).
+    /// Spawns `claude -p "<prompt>" --fork-session <session_id>` as a
+    /// disposable subprocess. The fork inherits the agent's full conversation
+    /// context but runs independently — the main session is not interrupted.
+    /// Returns a stream of fork events (output, cost, exit status).
+    /// Used by operator automation for organized commits, review triggers,
+    /// reality checks, and status reports.
+    pub async fn fork_session(&self, prompt: &str) -> Result<ForkHandle> { ... }
 }
 ```
 
@@ -635,6 +661,45 @@ A native Rust implementation of the SDK's protocol could eliminate the Python de
 2. `providers/claude/types.rs` mirrors the SDK's type system: `ClaudeAgentOptions`, `ClaudeMessage` (User, Assistant, System, Result), hook types, agent definitions, MCP server configs.
 3. The event stream is a Tokio channel exposed via UniFFI as an async Swift stream.
 4. The `ProviderTrait` boundary is designed so that a future native Rust provider can replace the SDK adapter without changing the Swift UI shell or any other engine code.
+
+#### 4.4.2 Session Fork Pattern
+
+Session forks enable Hoopoe to run one-shot operational tasks against an agent's full conversation context without pausing the agent's main session. This pattern, inspired by Factory Floor's `--fork-session` integration, is central to Hoopoe's operator automation (Section 3.3.4).
+
+**Mechanism:** The Claude CLI supports `claude -p "<prompt>" --fork-session <session_id>`, which creates a disposable copy of the specified session. The fork inherits the complete conversation history (including tool results, file context, and bead-specific knowledge) but runs as a separate process with its own PTY. The main session continues uninterrupted.
+
+**Implementation in Rust (`fork_session.rs`):**
+
+```rust
+// In hoopoe-engine/src/providers/claude/fork_session.rs
+pub struct ForkHandle {
+    child: tokio::process::Child,
+    output_stream: tokio::sync::mpsc::Receiver<ForkEvent>,
+    correlation_id: Uuid,  // Links fork events to the parent agent and triggering bead
+}
+
+pub enum ForkEvent {
+    Output(String),           // Streamed text output
+    ToolUse(ToolUseRecord),   // Tool calls made by the fork
+    Cost(CostDelta),          // Token usage for budget tracking
+    Completed(ExitStatus),    // Fork finished
+}
+```
+
+The engine spawns the fork as a lightweight Tokio task. Fork output is captured, tagged with the parent agent's `correlation_id`, and written to the event log. Cost data from forks is attributed to the parent agent's budget.
+
+**Use cases:**
+- **Organized commits**: Fork runs the commit prompt, reads the worktree, creates structured commits, and exits.
+- **Review triggers**: Fork runs "fresh eyes" review with full bead context, outputs findings as structured JSON.
+- **Reality checks**: All agents are forked simultaneously to collect status assessments.
+- **Bead status reports**: Fork summarizes progress on the current bead without interrupting work.
+- **`.context/` updates**: Fork can write architectural decisions or notes to `.context/` after completing a bead.
+
+**Constraints:**
+- Forks are fire-and-forget — they cannot send messages back to the main session.
+- Forks run with `--dangerously-skip-permissions` since they inherit the parent's safety context and the engine controls what prompts are sent.
+- Fork lifetime is capped (default: 5 minutes) to prevent runaway cost. The engine kills forks that exceed the timeout.
+- Only the Claude provider supports forks natively. For Codex and Gemini, equivalent one-shot operations are handled by spawning a new short-lived agent session with relevant context injected via the prompt.
 
 #### 4.4.1 SDK ↔ CLI Protocol (Verified from Claude Code Source)
 
@@ -761,7 +826,7 @@ A prominent button in the Swarm Dashboard that triggers a structured cross-agent
 
 ### 5.7 Automatic AGENTS.md Generation
 
-Hoopoe generates AGENTS.md files automatically, composing them from: a standard template with the Flywheel's core rules (Rule 0 override prerogative, no file deletion, no destructive git, etc.), project-specific context extracted from the plan, tool documentation blurbs for br, bv, Agent Mail, and any other tools in the project, and per-phase behavioral adjustments (e.g., during hardening, agents get additional review instructions).
+Hoopoe generates AGENTS.md files automatically, composing them from: a standard template with the Flywheel's core rules (Rule 0 override prerogative, no file deletion, no destructive git, etc.), project-specific context extracted from the plan, tool documentation blurbs for br, bv, Agent Mail, and any other tools in the project, per-phase behavioral adjustments (e.g., during hardening, agents get additional review instructions), and **a pointer to the `.context/` directory** instructing agents to read `plan-summary.md` and `beads-manifest.md` for project context and to append architectural decisions or notable patterns to `.context/decisions/` as they work.
 
 ### 5.8 Cost Optimization Engine
 
@@ -770,6 +835,50 @@ Hoopoe tracks token usage per agent, per model, per bead and provides: cost proj
 ### 5.9 Next Action Panel
 
 A persistent, always-visible panel (`NextActionPanel.swift`) that answers one question: "What should I do right now?" The panel inspects the full engine state — blocked dependencies, failed quality gates, pending approval requests, dead-letter runs, stalled leases, cheap review wins, cost alerts, and upcoming milestones — and surfaces the single highest-priority intervention with a one-click action button. During planning, it might say "Section 'failure modes' is empty — add failure scenarios before converting to beads." During swarm execution, it might say "Run br-042 failed twice — review the dead-letter summary and reassign or split the bead." During hardening, it might say "3 review findings are unresolved — accept or create new beads." The panel replaces cognitive overload with directed focus, making Hoopoe usable by operators who don't yet have deep Flywheel expertise.
+
+### 5.10 Shared Context Directory (`.context/`)
+
+A `.context/` directory in the project root serves as a persistent, filesystem-based shared knowledge layer that complements Agent Mail's real-time messaging. Every agent can read and write to `.context/` using standard file operations — no MCP calls, no API, no coordination protocol required.
+
+**Why filesystem, not database:** Coding agents are optimized for file manipulation. A Markdown file on disk is the lowest-friction way to share context — agents can `cat`, `grep`, and `Read` it naturally. The directory is git-tracked, so context evolves with the codebase and survives across sessions.
+
+**Auto-populated files (managed by `context_dir.rs`):**
+
+| File | Populated when | Contents |
+|------|---------------|----------|
+| `.context/plan-summary.md` | Plan → Beads conversion | Condensed plan with stable section IDs, key constraints, and architecture decisions |
+| `.context/beads-manifest.md` | Bead conversion + after each bead completion | All beads with IDs, titles, statuses, dependencies, acceptance criteria, and assigned agent |
+| `.context/architecture-context.md` | Swarm launch | Tech stack, repo structure, key abstractions, and integration points extracted from the plan |
+
+**Agent-written files (encouraged via AGENTS.md instructions):**
+
+| Directory | Purpose |
+|-----------|---------|
+| `.context/decisions/` | Architectural Decision Records (ADRs) — agents append a short Markdown file when they make a non-obvious design choice |
+| `.context/notes/` | Free-form notes — agents write observations, gotchas, or patterns discovered during implementation |
+
+**Engine responsibilities:**
+- `context_dir.rs` regenerates auto-populated files at phase transitions (plan finalized, beads converted, swarm launched, bead completed) and on explicit refresh
+- The engine watches `.context/decisions/` for new files and surfaces them in the Next Action panel ("Agent 'Night-Watchman' recorded a new architectural decision — review it")
+- Stale entries in `beads-manifest.md` are updated as bead statuses change, so agents always see current state on their next file read
+- The `.context/` directory is added to the project's `.gitignore` by default (user can override to track context in version control)
+
+**Relationship to Agent Mail:** Agent Mail is for real-time, addressed messages between specific agents ("@Night-Watchman, I need the auth module interface before I can proceed"). `.context/` is for broadcast, persistent knowledge that any agent — current or future — can discover by reading files. They are complementary: Agent Mail for coordination, `.context/` for shared memory.
+
+### 5.11 Session Forks for Non-Disruptive Operations
+
+Traditional operator automation (organized commits, review triggers, status reports) requires interrupting an agent's main session — injecting a prompt that derails the agent's current train of thought. Hoopoe eliminates this problem with **session forks**: disposable copies of an agent's session that run one-shot operations in parallel (see Section 4.4.2 for the protocol).
+
+**Key insight:** The agent's main session contains rich context — which files it has read, what architectural decisions it has made, what bead it is working on. A fork inherits all of this context, making it far more effective than a cold-start agent for operational tasks. Yet the main session is never paused or interrupted.
+
+**Operational benefits:**
+- **Zero-interruption commits**: Organized commit forks run every 2 hours, reading the worktree and creating structured commits while the agent continues coding.
+- **Parallel review**: Review forks can run against every agent simultaneously for the One-Click Reality Check, collecting assessments without pausing anyone.
+- **Context-aware reporting**: Fork-based status reports are richer than cold-start assessments because the fork knows what the agent has been doing.
+- **Lower cost than full sessions**: Forks inherit context without re-ingesting it, so they use fewer tokens than spawning a new agent for the same task.
+- **`.context/` enrichment**: After completing a bead, a fork can write architectural notes or decision records to `.context/` without the main agent needing to context-switch.
+
+**Scope:** Session forks are a Claude-specific capability (via `--fork-session`). For Codex and Gemini agents, equivalent one-shot operations are handled by spawning a short-lived agent session with relevant context injected via the prompt and `.context/` files.
 
 ---
 
@@ -949,6 +1058,7 @@ Hoopoe uses a split concurrency architecture:
 ### Phase 3: Bead Creation & Curation
 
 - Plan-to-beads conversion via Claude provider with structured output (enriched beads with acceptance criteria, test obligations, risk level, capabilities, rollback notes)
+- **`.context/` directory manager** (`context_dir.rs`): auto-populate `plan-summary.md`, `beads-manifest.md`, and `architecture-context.md` on conversion; scaffold `decisions/` and `notes/` subdirectories
 - Traceability engine (`traceability.rs`): persistent section↔bead links via stable section IDs
 - Bead kanban board and list views (SwiftUI binding to `BeadsVM`)
 - Bead dependency graph visualization (interactive, force-directed, AppKit)
@@ -961,8 +1071,10 @@ Hoopoe uses a split concurrency architecture:
 
 - Scheduler (`scheduler.rs`), run state machine (`run_manager.rs`), lease manager (`lease_manager.rs`), dead-letter queue (`dead_letter.rs`)
 - Agent process management with PTY ownership + structured channels
+- **Session fork support** (`fork_session.rs`): Claude `--fork-session` integration for non-disruptive operator automation (organized commits, review triggers, reality checks, `.context/` updates)
 - **Codex `app-server` JSON-RPC integration** (`providers/codex.rs`) — introduced here to validate the `ProviderTrait` abstraction under real multi-provider scheduling
 - Agent Mail MCP server integration in Rust coordination layer
+- `.context/` refresh on bead completion: auto-update `beads-manifest.md` statuses; surface new agent-written decisions in Next Action panel
 - Swarm dashboard with live agent cards (SwiftUI binding to `SwarmVM`)
 - Next Action panel (`NextActionPanel.swift`)
 - Adaptive ramp-up launch, auto-compaction recovery
