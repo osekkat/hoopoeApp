@@ -96,6 +96,7 @@ struct VersionListView: View {
                             description: "Manual snapshot"
                         )
                         selectedVersionId = snapshot.id
+                        showingDiff = false
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -201,8 +202,8 @@ struct VersionListView: View {
                 titleVisibility: .visible
             ) {
                 Button("Restore") {
-                    let restoredVersion = versionManager.restore(version, in: plan)
-                    selectedVersionId = restoredVersion.id
+                    versionManager.restore(version, in: plan)
+                    selectedVersionId = nil
                     showingDiff = false
                 }
             } message: {
@@ -229,7 +230,7 @@ struct VersionListView: View {
     }
 
     private func canRestore(_ version: PlanVersion) -> Bool {
-        version.content != plan.content
+        plan.isDirty || version.content != plan.content
     }
 
     private func versionMetadata(for version: PlanVersion) -> String {

@@ -1,22 +1,14 @@
 import HoopoeUI
+import HoopoeUtils
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Sidebar Items
+// MARK: - Sidebar Selection
 
-enum SidebarItem: String, Identifiable, CaseIterable {
-    case plans = "Plans"
-    case newPlan = "New Plan"
-
-    var id: String { rawValue }
-
-    var icon: String {
-        switch self {
-        case .plans: "doc.text"
-        case .newPlan: "plus.square"
-        }
-    }
+enum SidebarSelection: Hashable {
+    case plan(UUID)
+    case newPlan
 }
 
 // MARK: - Routes
@@ -86,32 +78,34 @@ final class NavigationRouter {
         !forwardStack.isEmpty
     }
 
-    var selectedSidebarItem: SidebarItem? {
+    var selectedSidebarSelection: SidebarSelection? {
         guard let currentRoute else {
             return nil
         }
 
         switch currentRoute {
-        case .plansHome, .planEditor, .multiModelSynthesis, .refinement, .versionHistory:
-            return .plans
+        case let .planEditor(planId),
+            let .multiModelSynthesis(planId),
+            let .refinement(planId),
+            let .versionHistory(planId):
+            return .plan(planId)
         case .planGeneration, .planWizard:
             return .newPlan
+        case .plansHome:
+            return nil
         }
     }
 
-    func handleSidebarSelection(_ item: SidebarItem?) {
-        guard let item else {
-            currentRoute = nil
-            backStack.removeAll()
-            forwardStack.removeAll()
+    func handleSidebarSelection(_ selection: SidebarSelection?) {
+        guard let selection else {
             return
         }
 
-        switch item {
-        case .plans:
-            navigate(to: .plansHome)
+        switch selection {
         case .newPlan:
             navigate(to: .planWizard)
+        case let .plan(planId):
+            navigate(to: .planEditor(planId: planId))
         }
     }
 
@@ -197,9 +191,9 @@ struct ContentView: View {
         _versionManager = State(initialValue: PlanVersionManager(store: store))
     }
 
-    private var sidebarSelection: Binding<SidebarItem?> {
+    private var sidebarSelection: Binding<SidebarSelection?> {
         Binding(
-            get: { router.selectedSidebarItem },
+            get: { router.selectedSidebarSelection },
             set: { router.handleSidebarSelection($0) }
         )
     }
@@ -276,9 +270,13 @@ struct ContentView: View {
         case .planGeneration:
             PlanGenerationView(router: router, planStore: planStore)
         case .planWizard:
-            PlanWizardPlaceholderView(router: router)
+            PlanWizardView(router: router, planStore: planStore)
         case let .multiModelSynthesis(planId):
-            MultiModelSynthesisPlaceholderView(planId: planId, router: router)
+            if let plan = plan(for: planId) {
+                CompetingPlansView(plan: plan, planStore: planStore, router: router)
+            } else {
+                MissingPlanRouteView(planId: planId, router: router)
+            }
         case let .refinement(planId):
             RefinementPlaceholderView(planId: planId, router: router)
         case let .versionHistory(planId):
@@ -340,7 +338,7 @@ struct ContentView: View {
 // MARK: - Sidebar
 
 struct SidebarView: View {
-    @Binding var selection: SidebarItem?
+    @Binding var selection: SidebarSelection?
     let planStore: PlanStore
     let router: NavigationRouter
 
@@ -360,10 +358,10 @@ struct SidebarView: View {
                 } else {
                     ForEach(sortedPlans) { plan in
                         PlanRowView(plan: plan)
-                            .tag(SidebarItem.plans)
+                            .tag(SidebarSelection.plan(plan.id))
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                router.navigate(to: .planEditor(planId: plan.id))
+                                openPlan(plan)
                             }
                             .contextMenu {
                                 planContextMenu(for: plan)
@@ -374,7 +372,11 @@ struct SidebarView: View {
 
             Section {
                 Label("New Plan", systemImage: "plus.square")
-                    .tag(SidebarItem.newPlan)
+                    .tag(SidebarSelection.newPlan)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        openPlanWizard()
+                    }
             }
         }
         .listStyle(.sidebar)
@@ -382,7 +384,7 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button {
-                    router.navigate(to: .planGeneration)
+                    openPlanWizard()
                 } label: {
                     Label("New Plan", systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -393,13 +395,12 @@ struct SidebarView: View {
             }
             .background(.bar)
         }
-        .confirmationDialog(
-            "Delete Plan",
+        .alert(
+            "Delete Plan?",
             isPresented: Binding(
                 get: { planToDelete != nil },
                 set: { if !$0 { planToDelete = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("Delete", role: .destructive) {
                 if let plan = planToDelete {
@@ -486,12 +487,23 @@ struct SidebarView: View {
 
                 Button("Rename") {
                     let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        plan.title = trimmed
-                        plan.updatedAt = Date()
-                        try? planStore.save(plan)
+                    guard !trimmed.isEmpty else {
+                        return
                     }
-                    planToRename = nil
+
+                    let previousTitle = plan.title
+                    let previousUpdatedAt = plan.updatedAt
+                    plan.title = trimmed
+                    plan.updatedAt = Date()
+
+                    do {
+                        try planStore.save(plan)
+                        planToRename = nil
+                    } catch {
+                        plan.title = previousTitle
+                        plan.updatedAt = previousUpdatedAt
+                        presentErrorAlert(error)
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -504,11 +516,27 @@ struct SidebarView: View {
 
     private func deletePlan(_ plan: PlanDocument) {
         let wasSelected = router.currentRoute?.planID == plan.id
-        try? planStore.delete(plan)
-        if wasSelected {
-            router.navigate(to: .plansHome)
+        do {
+            try planStore.delete(plan)
+            if wasSelected {
+                router.navigate(to: .plansHome)
+            }
+        } catch {
+            presentErrorAlert(error)
         }
         planToDelete = nil
+    }
+
+    private func openPlan(_ plan: PlanDocument) {
+        router.navigate(to: .planEditor(planId: plan.id))
+    }
+
+    private func openPlanWizard() {
+        router.navigate(to: .planWizard)
+    }
+
+    private func presentErrorAlert(_ error: Error) {
+        NSAlert(error: error).runModal()
     }
 }
 
@@ -595,22 +623,123 @@ struct InspectorPanel: View {
 
 struct PlansHomeView: View {
     let router: NavigationRouter
+    private let settings = AppSettings.shared
 
     var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "doc.text.magnifyingglass",
-            title: "Plans",
-            message: "This route now owns the plan-centric flow. Use the buttons below to exercise programmatic navigation."
-        ) {
-            Button("Open Sample Plan Editor") {
-                router.navigate(to: .planEditor(planId: NavigationRouter.samplePlanID))
+        if settings.hasCompletedOnboarding {
+            RoutePlaceholderCard(
+                systemImage: "doc.text.magnifyingglass",
+                title: "Plans",
+                message: "Select a plan from the sidebar to start editing, or create a new one."
+            ) {
+                Button("Create New Plan") {
+                    router.navigate(to: .planGeneration)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
+        } else {
+            OnboardingCardView(router: router)
+        }
+    }
+}
 
-            Button("Start New Plan Wizard") {
-                router.navigate(to: .planWizard)
+// MARK: - Onboarding Card
+
+struct OnboardingCardView: View {
+    let router: NavigationRouter
+    @Environment(\.openSettings) private var openSettings
+    private let settings = AppSettings.shared
+    @State private var hasProviders = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "bird")
+                .font(.system(size: 56))
+                .foregroundStyle(.tint)
+
+            Text("Welcome to Hoopoe")
+                .font(.largeTitle.weight(.semibold))
+
+            Text("Hoopoe helps you create exhaustive, high-quality project plans using AI. Configure your API keys to enable AI-powered generation, then create your first plan.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 480)
+
+            VStack(spacing: 12) {
+                if hasProviders {
+                    Button {
+                        completeOnboarding()
+                        router.navigate(to: .planGeneration)
+                    } label: {
+                        Label("Create Your First Plan", systemImage: "wand.and.stars")
+                            .frame(minWidth: 220)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Button {
+                        completeOnboarding()
+                        showSettings()
+                    } label: {
+                        Label("Configure API Keys", systemImage: "key")
+                            .frame(minWidth: 220)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                } else {
+                    Button {
+                        completeOnboarding()
+                        showSettings()
+                    } label: {
+                        Label("Configure API Keys", systemImage: "key")
+                            .frame(minWidth: 220)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Button {
+                        completeOnboarding()
+                        router.navigate(to: .planGeneration)
+                    } label: {
+                        Label("Create Your First Plan", systemImage: "wand.and.stars")
+                            .frame(minWidth: 220)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
             }
-            .buttonStyle(.bordered)
+
+            Button("Skip") {
+                completeOnboarding()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .font(.callout)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .task {
+            await checkProviders()
+        }
+    }
+
+    private func completeOnboarding() {
+        settings.hasCompletedOnboarding = true
+    }
+
+    private func showSettings() {
+        openSettings()
+    }
+
+    private func checkProviders() async {
+        let keychain = KeychainService()
+        for provider in KeychainService.Provider.allCases {
+            let accounts = (try? await keychain.listAccounts(provider: provider.rawValue)) ?? []
+            if !accounts.isEmpty {
+                hasProviders = true
+                return
+            }
         }
     }
 }
@@ -662,6 +791,11 @@ struct PlanEditorRouteView: View {
     var body: some View {
         editorContent
             .focusedValue(\.plan, plan)
+            .focusedValue(\.previewMode, $previewMode)
+            .focusedValue(\.editorFormatting, EditorFormatting(
+                bold: { wrapSelection(prefix: "**", suffix: "**") },
+                italic: { wrapSelection(prefix: "*", suffix: "*") }
+            ))
             .onAppear { previewMarkdown = plan.content }
             .onChange(of: plan.content) { _, newValue in
                 debouncePreviewUpdate(newValue)
@@ -693,45 +827,208 @@ struct PlanEditorRouteView: View {
     // MARK: - Toolbar
 
     private var editorToolbar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 0) {
+            // Primary toolbar: title, preview, navigation
+            HStack(spacing: 12) {
                 Text(plan.title)
                     .font(.title3.weight(.semibold))
 
-                Text("Selection: \(selectedRange.location):\(selectedRange.length) • \(wordCount) words")
+                Spacer()
+
+                Picker("Preview", selection: $previewMode) {
+                    ForEach(PreviewMode.allCases, id: \.self) { mode in
+                        Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 200)
+
+                Button("Refinement") {
+                    router.navigate(to: .refinement(planId: plan.id))
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Version History") {
+                    router.navigate(to: .versionHistory(planId: plan.id))
+                }
+                .buttonStyle(.bordered)
+
+                Button("Synthesis") {
+                    router.navigate(to: .multiModelSynthesis(planId: plan.id))
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            // Formatting toolbar
+            HStack(spacing: 4) {
+                // Formatting buttons
+                Group {
+                    formatButton(icon: "bold", tooltip: "Bold (Cmd+B)") {
+                        wrapSelection(prefix: "**", suffix: "**")
+                    }
+                    formatButton(icon: "italic", tooltip: "Italic (Cmd+I)") {
+                        wrapSelection(prefix: "*", suffix: "*")
+                    }
+                    formatButton(icon: "chevron.left.forwardslash.chevron.right", tooltip: "Inline Code") {
+                        wrapSelection(prefix: "`", suffix: "`")
+                    }
+
+                    Divider().frame(height: 16)
+
+                    // Heading picker
+                    Menu {
+                        Button("Heading 1") { insertLinePrefix("# ") }
+                        Button("Heading 2") { insertLinePrefix("## ") }
+                        Button("Heading 3") { insertLinePrefix("### ") }
+                        Button("Heading 4") { insertLinePrefix("#### ") }
+                    } label: {
+                        Label("Heading", systemImage: "textformat.size")
+                            .font(.callout)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(width: 32)
+
+                    Divider().frame(height: 16)
+
+                    formatButton(icon: "list.bullet", tooltip: "Bullet List") {
+                        insertLinePrefix("- ")
+                    }
+                    formatButton(icon: "list.number", tooltip: "Numbered List") {
+                        insertLinePrefix("1. ")
+                    }
+                    formatButton(icon: "text.quote", tooltip: "Blockquote") {
+                        insertLinePrefix("> ")
+                    }
+                    formatButton(icon: "curlybraces", tooltip: "Code Block") {
+                        wrapSelection(prefix: "```\n", suffix: "\n```")
+                    }
+                    formatButton(icon: "link", tooltip: "Link") {
+                        insertLink()
+                    }
+                }
+
+                Divider().frame(height: 16)
+
+                // Section navigation
+                sectionNavigationMenu
+
+                Spacer()
+
+                // Word count
+                Text("\(wordCount) words")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(.bar)
+        }
+    }
 
-            Spacer()
+    private func formatButton(icon: String, tooltip: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+    }
 
-            // Preview mode picker
-            Picker("Preview", selection: $previewMode) {
-                ForEach(PreviewMode.allCases, id: \.self) { mode in
-                    Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+    private var sectionNavigationMenu: some View {
+        Menu {
+            if headings.isEmpty {
+                Text("No headings")
+            } else {
+                ForEach(headings, id: \.offset) { heading in
+                    Button {
+                        editorProxy.scrollToSection(heading.text)
+                    } label: {
+                        Text(String(repeating: "  ", count: heading.level - 1) + heading.text)
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 200)
-
-            Button("Refinement") {
-                router.navigate(to: .refinement(planId: plan.id))
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button("Version History") {
-                router.navigate(to: .versionHistory(planId: plan.id))
-            }
-            .buttonStyle(.bordered)
-
-            Button("Synthesis") {
-                router.navigate(to: .multiModelSynthesis(planId: plan.id))
-            }
-            .buttonStyle(.bordered)
+        } label: {
+            Label("Sections", systemImage: "list.bullet.indent")
+                .font(.callout)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .menuStyle(.borderlessButton)
+        .frame(width: 32)
+        .help("Jump to section")
+    }
+
+    // MARK: - Headings
+
+    private struct Heading {
+        let text: String
+        let level: Int
+        let offset: Int
+    }
+
+    private var headings: [Heading] {
+        var result: [Heading] = []
+        var offset = 0
+        for line in plan.content.components(separatedBy: "\n") {
+            if line.hasPrefix("#") {
+                var level = 0
+                for ch in line { if ch == "#" { level += 1 } else { break } }
+                if level >= 1, level <= 6, line.count > level,
+                   line[line.index(line.startIndex, offsetBy: level)] == " "
+                {
+                    let text = String(line.dropFirst(level + 1))
+                    result.append(Heading(text: text, level: level, offset: offset))
+                }
+            }
+            offset += line.count + 1 // +1 for newline
+        }
+        return result
+    }
+
+    // MARK: - Formatting Actions
+
+    private func wrapSelection(prefix: String, suffix: String) {
+        let content = plan.content
+        let nsContent = content as NSString
+        let range = selectedRange
+        if range.length > 0 {
+            let selected = nsContent.substring(with: range)
+            editorProxy.insertText("\(prefix)\(selected)\(suffix)")
+        } else {
+            editorProxy.insertText("\(prefix)\(suffix)")
+        }
+    }
+
+    private func insertLinePrefix(_ prefix: String) {
+        let content = plan.content
+        let nsContent = content as NSString
+        // Find the start of the current line
+        let lineRange = nsContent.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+        let lineText = nsContent.substring(with: lineRange)
+        // Strip existing heading prefix if present
+        var stripped = lineText
+        if stripped.hasPrefix("#") {
+            // Remove existing heading markers
+            while stripped.hasPrefix("#") { stripped = String(stripped.dropFirst()) }
+            if stripped.hasPrefix(" ") { stripped = String(stripped.dropFirst()) }
+        }
+        let replacement = prefix + stripped
+        editorProxy.selectRange(lineRange)
+        editorProxy.insertText(replacement)
+    }
+
+    private func insertLink() {
+        let range = selectedRange
+        let nsContent = plan.content as NSString
+        if range.length > 0 {
+            let selected = nsContent.substring(with: range)
+            editorProxy.insertText("[\(selected)](url)")
+        } else {
+            editorProxy.insertText("[link text](url)")
+        }
     }
 
     // MARK: - Editor Pane

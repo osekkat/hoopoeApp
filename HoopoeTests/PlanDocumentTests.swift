@@ -181,6 +181,58 @@ struct PlanDocumentTests {
     }
 }
 
+// MARK: - Navigation Router Sidebar Tests
+
+@Suite("NavigationRouterSidebar")
+@MainActor
+struct NavigationRouterSidebarTests {
+    @Test("Plan routes map to plan-specific sidebar selection")
+    func planRoutesMapToPlanSelection() {
+        let planID = UUID()
+        let router = NavigationRouter(initialRoute: .planEditor(planId: planID))
+
+        #expect(router.selectedSidebarSelection == .plan(planID))
+
+        router.navigate(to: .versionHistory(planId: planID))
+        #expect(router.selectedSidebarSelection == .plan(planID))
+
+        router.navigate(to: .refinement(planId: planID))
+        #expect(router.selectedSidebarSelection == .plan(planID))
+    }
+
+    @Test("Selecting a plan sidebar row navigates to that plan editor")
+    func selectingPlanSidebarRowNavigatesToEditor() {
+        let planID = UUID()
+        let router = NavigationRouter(initialRoute: .plansHome)
+
+        router.handleSidebarSelection(.plan(planID))
+
+        #expect(router.currentRoute == .planEditor(planId: planID))
+        #expect(router.selectedSidebarSelection == .plan(planID))
+    }
+
+    @Test("Selecting new plan sidebar row navigates to the wizard")
+    func selectingNewPlanNavigatesToWizard() {
+        let router = NavigationRouter(initialRoute: .plansHome)
+
+        router.handleSidebarSelection(.newPlan)
+
+        #expect(router.currentRoute == .planWizard)
+        #expect(router.selectedSidebarSelection == .newPlan)
+    }
+
+    @Test("Clearing sidebar selection preserves the current route")
+    func clearingSidebarSelectionPreservesRoute() {
+        let planID = UUID()
+        let router = NavigationRouter(initialRoute: .planEditor(planId: planID))
+
+        router.handleSidebarSelection(nil)
+
+        #expect(router.currentRoute == .planEditor(planId: planID))
+        #expect(router.selectedSidebarSelection == .plan(planID))
+    }
+}
+
 // MARK: - Convergence Metrics Tests
 
 @Suite("ConvergenceMetricsBackfill")

@@ -105,7 +105,12 @@ final class PlanVersionManager {
 
     /// Returns all versions for a plan, newest first.
     func getVersions(for plan: PlanDocument) -> [PlanVersion] {
-        plan.versions.sorted { $0.createdAt > $1.createdAt }
+        plan.versions.sorted { lhs, rhs in
+            if lhs.roundNumber == rhs.roundNumber {
+                return lhs.createdAt > rhs.createdAt
+            }
+            return lhs.roundNumber > rhs.roundNumber
+        }
     }
 
     /// Returns a specific version by ID.
@@ -121,6 +126,20 @@ final class PlanVersionManager {
     /// Restores a plan's content to a previous version and records the restore as a new snapshot.
     @discardableResult
     func restore(_ version: PlanVersion, in plan: PlanDocument) -> PlanVersion {
+        let currentMatchesTarget = plan.content == version.content
+
+        if currentMatchesTarget {
+            guard plan.isDirty else {
+                return latestVersion(for: plan) ?? version
+            }
+
+            return createVersion(
+                for: plan,
+                description: "Restored from round \(version.roundNumber)",
+                provenance: VersionProvenance(modelName: "user", promptType: .manual)
+            )
+        }
+
         if plan.isDirty {
             createVersion(
                 for: plan,

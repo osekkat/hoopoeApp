@@ -23,11 +23,13 @@
 		089C16BE293B2C5F00A1B2C3 /* DiffViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */; };
 		089C16C6293B2C5F00A1B2C3 /* ConvergenceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */; };
 		089C16C8293B2C5F00A1B2C3 /* ConvergenceMeterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */; };
+		089C16CA293B2C5F00A1B2C3 /* CompetingPlansView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */; };
 		089C1730293B2C5F00A1B2C3 /* PlanDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */; };
 		089C1731293B2C5F00A1B2C3 /* PlanStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */; };
 		089C1732293B2C5F00A1B2C3 /* DiffEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */; };
 		089C1733293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */; };
 		089C1734293B2C5F00A1B2C3 /* ConvergenceMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1724293B2C5F00A1B2C3 /* ConvergenceMetricsTests.swift */; };
+		089C1735293B2C5F00A1B2C3 /* CompetingPlansManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1725293B2C5F00A1B2C3 /* CompetingPlansManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,11 +49,13 @@
 		089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffViewer.swift; sourceTree = "<group>"; };
 		089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvergenceMetrics.swift; sourceTree = "<group>"; };
 		089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvergenceMeterView.swift; sourceTree = "<group>"; };
+		089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetingPlansView.swift; sourceTree = "<group>"; };
 		089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanDocumentTests.swift; sourceTree = "<group>"; };
 		089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStoreTests.swift; sourceTree = "<group>"; };
 		089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffEngineTests.swift; sourceTree = "<group>"; };
 		089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanVersionManagerTests.swift; sourceTree = "<group>"; };
 		089C1724293B2C5F00A1B2C3 /* ConvergenceMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvergenceMetricsTests.swift; sourceTree = "<group>"; };
+		089C1725293B2C5F00A1B2C3 /* CompetingPlansManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetingPlansManagerTests.swift; sourceTree = "<group>"; };
 		089C1741293B2C5F00A1B2C3 /* HoopoeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HoopoeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -99,6 +103,7 @@
 				089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */,
 				089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */,
 				089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */,
+				089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */,
 				089C16A5293B2C5F00A1B2C3 /* Assets.xcassets */,
 				089C16A2293B2C5F00A1B2C3 /* Hoopoe.entitlements */,
 				089C16A7293B2C5F00A1B2C3 /* Preview Content */,
@@ -123,6 +128,7 @@
 				089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */,
 				089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */,
 				089C1724293B2C5F00A1B2C3 /* ConvergenceMetricsTests.swift */,
+				089C1725293B2C5F00A1B2C3 /* CompetingPlansManagerTests.swift */,
 			);
 			path = HoopoeTests;
 			sourceTree = "<group>";
@@ -265,6 +271,7 @@
 				089C16BE293B2C5F00A1B2C3 /* DiffViewer.swift in Sources */,
 				089C16C6293B2C5F00A1B2C3 /* ConvergenceMetrics.swift in Sources */,
 				089C16C8293B2C5F00A1B2C3 /* ConvergenceMeterView.swift in Sources */,
+				089C16CA293B2C5F00A1B2C3 /* CompetingPlansView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -277,6 +284,7 @@
 				089C1732293B2C5F00A1B2C3 /* DiffEngineTests.swift in Sources */,
 				089C1733293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift in Sources */,
 				089C1734293B2C5F00A1B2C3 /* ConvergenceMetricsTests.swift in Sources */,
+				089C1735293B2C5F00A1B2C3 /* CompetingPlansManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

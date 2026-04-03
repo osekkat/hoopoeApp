@@ -15,6 +15,20 @@ struct FocusedRouterKey: FocusedValueKey {
     typealias Value = NavigationRouter
 }
 
+struct FocusedPreviewModeKey: FocusedValueKey {
+    typealias Value = Binding<PreviewMode>
+}
+
+struct FocusedEditorFormattingKey: FocusedValueKey {
+    typealias Value = EditorFormatting
+}
+
+/// Closure-based formatting actions exposed from the editor route via FocusedValues.
+struct EditorFormatting {
+    let bold: () -> Void
+    let italic: () -> Void
+}
+
 extension FocusedValues {
     var plan: PlanDocument? {
         get { self[FocusedPlanKey.self] }
@@ -30,6 +44,16 @@ extension FocusedValues {
         get { self[FocusedRouterKey.self] }
         set { self[FocusedRouterKey.self] = newValue }
     }
+
+    var previewMode: Binding<PreviewMode>? {
+        get { self[FocusedPreviewModeKey.self] }
+        set { self[FocusedPreviewModeKey.self] = newValue }
+    }
+
+    var editorFormatting: EditorFormatting? {
+        get { self[FocusedEditorFormattingKey.self] }
+        set { self[FocusedEditorFormattingKey.self] = newValue }
+    }
 }
 
 // MARK: - Commands
@@ -38,6 +62,8 @@ struct HoopoeCommands: Commands {
     @FocusedValue(\.plan) private var activePlan
     @FocusedValue(\.planStore) private var planStore
     @FocusedValue(\.router) private var router
+    @FocusedValue(\.previewMode) private var previewMode
+    @FocusedValue(\.editorFormatting) private var editorFormatting
 
     var body: some Commands {
         // File menu additions
@@ -60,6 +86,22 @@ struct HoopoeCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(activePlan == nil)
+
+            Button("Export All Versions...") {
+                if let plan = activePlan {
+                    PlanExporter.exportAllVersions(plan: plan)
+                }
+            }
+            .disabled(activePlan == nil || (activePlan?.versions.isEmpty ?? true))
+
+            Divider()
+
+            Button("Share...") {
+                if let plan = activePlan {
+                    PlanExporter.share(plan: plan)
+                }
+            }
+            .disabled(activePlan == nil)
         }
 
         // Add to existing View menu (not CommandMenu, which creates a duplicate)
@@ -71,6 +113,34 @@ struct HoopoeCommands: Commands {
                 )
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+
+            Divider()
+
+            Button("Toggle Preview") {
+                guard let previewMode else { return }
+                switch previewMode.wrappedValue {
+                case .editorOnly: previewMode.wrappedValue = .split
+                case .split: previewMode.wrappedValue = .previewOnly
+                case .previewOnly: previewMode.wrappedValue = .editorOnly
+                }
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(previewMode == nil)
+        }
+
+        // Format menu: markdown formatting shortcuts
+        CommandMenu("Format") {
+            Button("Bold") {
+                editorFormatting?.bold()
+            }
+            .keyboardShortcut("b")
+            .disabled(editorFormatting == nil)
+
+            Button("Italic") {
+                editorFormatting?.italic()
+            }
+            .keyboardShortcut("i")
+            .disabled(editorFormatting == nil)
         }
 
         // Help menu override
@@ -153,6 +223,36 @@ enum PlanExporter {
                 return
             }
         }
+    }
+
+    /// Presents the macOS share sheet for the plan content.
+    @MainActor
+    static func share(plan: PlanDocument) {
+        let content = plan.content
+        let fileName = sanitizedFileName(plan.title) + ".md"
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            try content.write(to: tempURL, atomically: true, encoding: .utf8)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+            return
+        }
+
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView
+        else { return }
+
+        let picker = NSSharingServicePicker(items: [tempURL])
+        let frame = contentView.bounds
+        let anchorRect = NSRect(
+            x: frame.midX - 1,
+            y: frame.midY - 1,
+            width: 2,
+            height: 2
+        )
+        picker.show(relativeTo: anchorRect, of: contentView, preferredEdge: .minY)
     }
 
     private static func sanitizedFileName(_ title: String) -> String {

@@ -30,7 +30,6 @@ struct MarkdownPreviewRepresentable: NSViewRepresentable {
         config.suppressesIncrementalRendering = true
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground")
         context.coordinator.webView = webView
         loadContent(into: webView)
         return webView
@@ -83,7 +82,7 @@ struct MarkdownPreviewRepresentable: NSViewRepresentable {
 
 enum MarkdownHTMLConverter {
     static func convert(_ markdown: String) -> String {
-        var lines = markdown.components(separatedBy: "\n")
+        let lines = markdown.components(separatedBy: "\n")
         var html: [String] = []
         var inCodeBlock = false
         var codeBlockContent: [String] = []

@@ -25,6 +25,7 @@ final class AppSettings {
         static let editorLineWrapping = "editorLineWrapping"
         static let editorShowLineNumbers = "editorShowLineNumbers"
         static let editorTheme = "editorTheme"
+        static let hasCompletedOnboarding = "hasCompletedOnboarding"
     }
 
     // MARK: - Storage
@@ -70,6 +71,13 @@ final class AppSettings {
         didSet { defaults.set(editorTheme.rawValue, forKey: Key.editorTheme) }
     }
 
+    // MARK: - Onboarding
+
+    /// Whether the user has completed the first-run onboarding.
+    var hasCompletedOnboarding: Bool {
+        didSet { defaults.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) }
+    }
+
     // MARK: - Init
 
     init(defaults: UserDefaults = .standard) {
@@ -87,6 +95,7 @@ final class AppSettings {
             Key.editorLineWrapping: true,
             Key.editorShowLineNumbers: true,
             Key.editorTheme: EditorTheme.system.rawValue,
+            Key.hasCompletedOnboarding: false,
         ])
 
         // Load persisted values
@@ -113,6 +122,8 @@ final class AppSettings {
         } else {
             self.editorTheme = .system
         }
+
+        self.hasCompletedOnboarding = defaults.bool(forKey: Key.hasCompletedOnboarding)
     }
 }
 

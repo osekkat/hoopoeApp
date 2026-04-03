@@ -129,8 +129,9 @@ final class MarkdownHighlighterTests: XCTestCase {
                 .backgroundColor,
                 in: NSRange(location: codeStart, length: "```\ncode here\n```".utf16.count)
             ) { value, _, _ in
-                guard value != nil else { return }
-                foundCodeBackground = true
+                if value != nil {
+                    foundCodeBackground = true
+                }
             }
             XCTAssertTrue(foundCodeBackground, "Code block after multibyte text should have background")
         }
@@ -212,6 +213,70 @@ final class MarkdownHighlighterTests: XCTestCase {
 
         XCTAssertNotNil(range)
         XCTAssertEqual((text as NSString).substring(with: range!), "## Architecture")
+    }
+
+    func testMarkdownSectionParserBuildsNestedSectionsFromTreeSitterHeadings() {
+        let text = """
+        # Intro
+        Alpha
+        ## Child
+        Beta
+        # Next
+        Gamma
+        """
+        let parser = MarkdownSectionParser()
+
+        let sections = parser.sections(in: text)
+        let nsText = text as NSString
+
+        XCTAssertEqual(sections.map(\.title), ["Intro", "Child", "Next"])
+        XCTAssertEqual(sections.map(\.level), [1, 2, 1])
+        XCTAssertEqual(
+            nsText.substring(with: sections[0].bodyRange),
+            "Alpha\n## Child\nBeta\n"
+        )
+        XCTAssertEqual(
+            nsText.substring(with: sections[1].bodyRange),
+            "Beta\n"
+        )
+    }
+
+    func testFoldedDisplayModelMapsVisibleLocationsAroundCollapsedSections() {
+        let text = """
+        # Intro
+        Alpha
+        Beta
+        ## Next
+        Gamma
+        """
+        let parser = MarkdownSectionParser()
+        let sections = parser.sections(in: text)
+        let collapsedID = try XCTUnwrap(sections.first?.identifier)
+        let model = FoldedDisplayModel.make(
+            documentText: text,
+            sections: sections,
+            collapsedSectionIDs: [collapsedID]
+        )
+        let displayNSString = model.text as NSString
+        let nextHeadingDocumentLocation = (text as NSString).range(of: "## Next").location
+
+        XCTAssertTrue(model.hasActiveFolds)
+        let placeholderRange = try XCTUnwrap(model.placeholderRanges[collapsedID])
+        XCTAssertTrue(displayNSString.substring(with: placeholderRange).contains("folded"))
+        XCTAssertNil(model.documentRange(forDisplayRange: placeholderRange))
+
+        let nextHeadingDisplayLocation = try XCTUnwrap(
+            model.displayLocation(forDocumentLocation: nextHeadingDocumentLocation)
+        )
+        XCTAssertEqual(
+            model.documentLocation(forDisplayLocation: nextHeadingDisplayLocation),
+            nextHeadingDocumentLocation
+        )
+        XCTAssertNil(
+            model.displayRange(
+                forDocumentRange: NSRange(location: sections[0].bodyRange.location, length: 1)
+            )
+        )
     }
 }
 #endif

@@ -283,4 +283,25 @@ struct PlanVersionManagerTests {
         #expect(plan.versions.last?.id == restored.id)
         #expect(plan.versions.last?.changeDescription == "Restored from round 1")
     }
+
+    @Test("restore records an explicit restore when dirty draft already matches target version")
+    func restoreDirtyDraftMatchingTargetCreatesSingleRestoreVersion() {
+        let store = makeStore()
+        let manager = PlanVersionManager(store: store)
+        let plan = store.createPlan(title: "Test", content: "A")
+
+        let v1 = manager.createVersion(for: plan, description: "v1")
+        plan.content = "B"
+        manager.createVersion(for: plan, description: "v2")
+        plan.content = "A"
+
+        let countBefore = plan.versions.count
+        let restored = manager.restore(v1, in: plan)
+
+        #expect(plan.content == "A")
+        #expect(plan.versions.count == countBefore + 1)
+        #expect(plan.versions.last?.id == restored.id)
+        #expect(plan.versions.last?.changeDescription == "Restored from round 1")
+        #expect(plan.versions.filter { $0.changeDescription.contains("Before restore") }.isEmpty)
+    }
 }
