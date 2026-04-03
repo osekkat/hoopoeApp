@@ -205,7 +205,10 @@ struct RefinementPanelView: View {
             case .refining:
                 VStack(spacing: 0) {
                     ScrollView {
-                        Text(attributedMarkdown(state.streamingText))
+                        // Use plain text during streaming to avoid re-parsing markdown
+                        // on every token (AttributedString(markdown:) is expensive).
+                        // Markdown rendering happens in the .completed state.
+                        Text(state.streamingText)
                             .textSelection(.enabled)
                             .font(.body)
                             .frame(maxWidth: .infinity, alignment: .leading)

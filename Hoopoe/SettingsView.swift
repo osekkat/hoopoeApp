@@ -318,8 +318,6 @@ private struct ProviderKeyRow: View {
     let onMakePrimary: () -> Void
     let onDelete: () -> Void
 
-    @State private var isRevealed = false
-
     var body: some View {
         HStack(spacing: 8) {
             // Primary indicator
