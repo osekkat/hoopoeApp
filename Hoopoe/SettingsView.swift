@@ -1,5 +1,4 @@
 import HoopoeUtils
-import Security
 import SwiftUI
 
 // MARK: - Settings Tabs
@@ -171,7 +170,7 @@ private struct ProviderSection: View {
                     SecureField(keyHint, text: $newKeyText)
                         .textFieldStyle(.roundedBorder)
 
-                    if keys.count > 0 {
+                    if !keys.isEmpty {
                         TextField("Label", text: $newKeyAccount)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 80)
@@ -213,20 +212,20 @@ private struct ProviderSection: View {
     private func loadKeys() async {
         do {
             let accounts = try await keychain.listAccounts(provider: providerKey)
-            keys = accounts.map { credential in
-                ProviderKeyEntry(
-                    account: credential.account,
-                    maskedKey: maskedKey(for: credential.account)
-                )
+            var entries: [ProviderKeyEntry] = []
+            for credential in accounts {
+                let masked = await maskedKey(for: credential.account)
+                entries.append(ProviderKeyEntry(account: credential.account, maskedKey: masked))
             }
+            keys = entries
         } catch {
             keys = []
         }
     }
 
-    private func maskedKey(for account: String) -> String {
+    private func maskedKey(for account: String) async -> String {
         do {
-            let secret = try blockingRetrieve(account: account)
+            let secret = try await keychain.retrieve(provider: providerKey, account: account)
             if secret.count > 4 {
                 return "..." + String(secret.suffix(4))
             }
@@ -234,27 +233,6 @@ private struct ProviderSection: View {
         } catch {
             return "****"
         }
-    }
-
-    private func blockingRetrieve(account: String) throws -> String {
-        // KeychainService is an actor; we call synchronously via a helper
-        // In real use this would be async; for display we use the nonisolated path
-        let service = "com.hoopoe.api-key.\(providerKey)"
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let secret = String(data: data, encoding: .utf8) else {
-            return "****"
-        }
-        return secret
     }
 
     private func addKey() {
@@ -284,12 +262,31 @@ private struct ProviderSection: View {
     }
 
     private func makePrimary(_ entry: ProviderKeyEntry) {
-        // Swap the selected key to the "default" account
+        // Swap: promoted key becomes "default", old "default" takes the promoted key's account name
         Task {
             do {
-                let secret = try await keychain.retrieve(provider: providerKey, account: entry.account)
-                try await keychain.delete(provider: providerKey, account: entry.account)
-                try await keychain.upsert(secret: secret, provider: providerKey, account: "default")
+                let promotedSecret = try await keychain.retrieve(provider: providerKey, account: entry.account)
+
+                // Retrieve old default if it exists, so we can preserve it under the swapped name
+                var oldDefaultSecret: String?
+                do {
+                    oldDefaultSecret = try await keychain.retrieve(provider: providerKey, account: "default")
+                } catch {
+                    // No existing default — nothing to swap
+                }
+
+                // Delete both entries before re-inserting to avoid duplicate errors
+                try? await keychain.delete(provider: providerKey, account: entry.account)
+                try? await keychain.delete(provider: providerKey, account: "default")
+
+                // Promoted key → "default"
+                try await keychain.store(secret: promotedSecret, provider: providerKey, account: "default")
+
+                // Old default → promoted key's old account name (if there was an old default)
+                if let oldSecret = oldDefaultSecret {
+                    try await keychain.store(secret: oldSecret, provider: providerKey, account: entry.account)
+                }
+
                 await loadKeys()
             } catch {
                 validationMessage = "Failed to set primary: \(error.localizedDescription)"

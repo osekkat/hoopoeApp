@@ -15,9 +15,9 @@ final class RefinementState {
     }
 
     var phase: Phase = .idle
-    var currentStream: AsyncThrowingStream<LLMEvent, Error>?
     private var streamTask: Task<Void, Never>?
-    var accumulatedText = ""
+    /// Text accumulated so far during streaming. Updated on each chunk.
+    var streamingText = ""
 
     var isRefining: Bool {
         if case .refining = phase { return true }
@@ -32,7 +32,6 @@ final class RefinementState {
     func cancel() {
         streamTask?.cancel()
         streamTask = nil
-        currentStream = nil
         if case .refining = phase {
             phase = .idle
         }
@@ -69,8 +68,9 @@ struct RefinementPanelView: View {
         }
         .onAppear {
             refinementRound = plan.versions.count
-            if selectedProviderId == nil {
-                selectedProviderId = registry.configuredProviders.first?.id
+            if selectedProviderId == nil, let first = registry.allModels.first {
+                selectedProviderId = first.provider.id
+                selectedModelId = first.model.id
             }
         }
     }
@@ -203,8 +203,26 @@ struct RefinementPanelView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             case .refining:
-                if let stream = state.currentStream {
-                    StreamingResponseView(stream: stream)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        Text(attributedMarkdown(state.streamingText))
+                            .textSelection(.enabled)
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                    Divider()
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Streaming...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.bar)
                 }
 
             case .completed(let text):
@@ -243,7 +261,7 @@ struct RefinementPanelView: View {
         else { return }
 
         state.cancel()
-        state.accumulatedText = ""
+        state.streamingText = ""
 
         let focusAreaText = focusAreas.isEmpty
             ? ""
@@ -265,24 +283,26 @@ struct RefinementPanelView: View {
             options: LLMRequestOptions(temperature: 0.4, stream: true)
         )
 
-        state.currentStream = stream
         state.phase = .refining
 
         let task = Task { @MainActor in
-            var fullText = ""
             do {
                 for try await event in stream {
                     switch event {
                     case .text(let chunk):
-                        fullText += chunk
+                        state.streamingText += chunk
                     case .done(let response):
-                        fullText = response.fullText
+                        state.phase = .completed(text: response.fullText)
+                        return
                     case .error(let error):
                         state.phase = .failed(error.localizedDescription)
                         return
                     }
                 }
-                state.phase = .completed(text: fullText)
+                // Stream ended without .done — use accumulated text
+                if case .refining = state.phase {
+                    state.phase = .completed(text: state.streamingText)
+                }
             } catch is CancellationError {
                 if case .refining = state.phase {
                     state.phase = .idle
@@ -307,12 +327,12 @@ struct RefinementPanelView: View {
 
         refinementRound += 1
         state.phase = .idle
-        state.currentStream = nil
+        state.streamingText = ""
     }
 
     private func rejectRefinement() {
         state.phase = .idle
-        state.currentStream = nil
+        state.streamingText = ""
     }
 
     // MARK: - Model Selection
