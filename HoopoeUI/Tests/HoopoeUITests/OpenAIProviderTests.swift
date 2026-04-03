@@ -270,6 +270,63 @@ final class OpenAIProviderTests: XCTestCase {
         XCTAssertEqual(response.fullText, "Recovered response")
         XCTAssertEqual(response.tokenUsage, TokenUsage(inputTokens: 12, outputTokens: 3))
     }
+
+    func testRetryLatencyIncludesBackoffAndEarlierAttempts() async throws {
+        let session = FakeOpenAIHTTPSession(
+            dataPlans: [
+                .init(statusCode: 429, headers: [:], body: Data()),
+                .init(
+                    statusCode: 200,
+                    headers: [:],
+                    body: try jsonData([
+                        "choices": [
+                            [
+                                "message": [
+                                    "content": "Recovered response",
+                                ],
+                            ],
+                        ],
+                        "usage": [
+                            "prompt_tokens": 12,
+                            "completion_tokens": 3,
+                        ],
+                    ])
+                ),
+            ]
+        )
+        let sleepRecorder = SleepRecorder()
+        let dateProvider = StepDateProvider([
+            Date(timeIntervalSince1970: 1_000),
+            Date(timeIntervalSince1970: 1_003),
+        ])
+        let provider = OpenAIProvider(
+            apiKey: "",
+            session: session,
+            sleepHandler: { seconds in
+                try await sleepRecorder.sleep(seconds: seconds)
+            },
+            nowProvider: {
+                await dateProvider.now()
+            }
+        )
+
+        let events = try await collectEvents(
+            from: provider.send(
+                prompt: "prompt",
+                model: "gpt-4o",
+                system: nil,
+                stream: false
+            )
+        )
+
+        guard case let .done(response)? = events.last else {
+            XCTFail("Expected a final done event")
+            return
+        }
+
+        XCTAssertEqual(await sleepRecorder.recordedSeconds(), [2])
+        XCTAssertEqual(response.latency, 3, accuracy: 0.000_1)
+    }
 }
 
 private actor FakeOpenAIHTTPSession: OpenAIHTTPSession {
@@ -376,6 +433,22 @@ private actor SleepRecorder {
 
     func recordedSeconds() -> [TimeInterval] {
         seconds
+    }
+}
+
+private actor StepDateProvider {
+    private let dates: [Date]
+    private var index = 0
+
+    init(_ dates: [Date]) {
+        self.dates = dates
+    }
+
+    func now() -> Date {
+        let clampedIndex = min(index, dates.count - 1)
+        let date = dates[clampedIndex]
+        index += 1
+        return date
     }
 }
 

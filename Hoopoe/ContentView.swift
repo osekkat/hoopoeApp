@@ -1,6 +1,7 @@
 import HoopoeUI
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Sidebar Items
 
@@ -154,9 +155,47 @@ final class NavigationRouter {
 
 // MARK: - Main Content View
 
+private enum SamplePlanSeed {
+    static let title = "Hoopoe Planning Sandbox"
+    static let content = """
+    # Hoopoe Planning Sandbox
+
+    ## Goals
+    - Capture the project vision in a form that can survive multiple refinement rounds.
+    - Keep the editor responsive while long markdown documents grow.
+    - Make section-level navigation easy from surrounding SwiftUI controls.
+
+    ## Constraints
+    - The editing surface is AppKit-backed for performance.
+    - The hosting shell is SwiftUI and should own navigation state.
+    - Cursor position must survive SwiftUI update passes.
+
+    ## Architecture
+    - `PlanEditorRepresentable` bridges SwiftUI into `PlanEditorView`.
+    - `PlanEditorProxy` exposes scroll, insert, and selection commands.
+    - The editor route owns the bound markdown string and secondary controls.
+
+    ## Testing Strategy
+    - Verify typing does not flicker or recreate the editor.
+    - Verify toolbar actions mutate or navigate the AppKit view.
+    - Verify selection state flows back into SwiftUI.
+    """
+}
+
 struct ContentView: View {
+    private let settings = AppSettings.shared
     @State private var router = NavigationRouter()
     @State private var inspectorIsVisible = true
+    @State private var planStore: PlanStore
+    @State private var versionManager: PlanVersionManager
+
+    init() {
+        let store = PlanStore(directory: AppSettings.shared.defaultSaveDirectory)
+        try? store.loadAll()
+        Self.ensureSamplePlan(in: store)
+        _planStore = State(initialValue: store)
+        _versionManager = State(initialValue: PlanVersionManager(store: store))
+    }
 
     private var sidebarSelection: Binding<SidebarItem?> {
         Binding(
@@ -167,7 +206,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: sidebarSelection)
+            SidebarView(selection: sidebarSelection, planStore: planStore, router: router)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
         } detail: {
             HSplitView {
@@ -181,6 +220,14 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .focusedValue(\.planStore, planStore)
+        .focusedValue(\.router, router)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers: providers)
+        }
+        .onChange(of: settings.defaultSaveDirectory) { _, newDirectory in
+            reloadPlanStore(for: newDirectory)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 Button {
@@ -221,9 +268,13 @@ struct ContentView: View {
         case .plansHome:
             PlansHomeView(router: router)
         case let .planEditor(planId):
-            PlanEditorRouteView(planId: planId, router: router)
+            if let plan = plan(for: planId) {
+                PlanEditorRouteView(plan: plan, router: router)
+            } else {
+                MissingPlanRouteView(planId: planId, router: router)
+            }
         case .planGeneration:
-            PlanGenerationView()
+            PlanGenerationView(router: router, planStore: planStore)
         case .planWizard:
             PlanWizardPlaceholderView(router: router)
         case let .multiModelSynthesis(planId):
@@ -231,10 +282,58 @@ struct ContentView: View {
         case let .refinement(planId):
             RefinementPlaceholderView(planId: planId, router: router)
         case let .versionHistory(planId):
-            VersionHistoryPlaceholderView(planId: planId, router: router)
+            if let plan = plan(for: planId) {
+                VersionListView(plan: plan, versionManager: versionManager, router: router)
+            } else {
+                MissingPlanRouteView(planId: planId, router: router)
+            }
         case nil:
             NoSelectionView()
         }
+    }
+
+    private func plan(for id: UUID) -> PlanDocument? {
+        planStore.plans.first { $0.id == id }
+    }
+
+    private func reloadPlanStore(for directory: URL) {
+        planStore.saveAllDirty()
+        planStore.storeDirectory = directory
+        try? planStore.loadAll()
+        Self.ensureSamplePlan(in: planStore)
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      url.pathExtension.lowercased() == "md"
+                else { return }
+
+                Task { @MainActor in
+                    if let plan = PlanImporter.importFile(at: url, into: planStore) {
+                        router.navigate(to: .planEditor(planId: plan.id))
+                    }
+                }
+            }
+            handled = true
+        }
+        return handled
+    }
+
+    private static func ensureSamplePlan(in store: PlanStore) {
+        guard store.plans.contains(where: { $0.id == NavigationRouter.samplePlanID }) == false else {
+            return
+        }
+
+        let samplePlan = store.createPlan(
+            id: NavigationRouter.samplePlanID,
+            title: SamplePlanSeed.title,
+            content: SamplePlanSeed.content
+        )
+        try? store.save(samplePlan)
     }
 }
 
@@ -242,18 +341,206 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @Binding var selection: SidebarItem?
+    let planStore: PlanStore
+    let router: NavigationRouter
+
+    @State private var planToDelete: PlanDocument?
+    @State private var planToRename: PlanDocument?
+    @State private var renameText = ""
+
+    private var sortedPlans: [PlanDocument] {
+        planStore.plans.sorted { $0.updatedAt > $1.updatedAt }
+    }
 
     var body: some View {
         List(selection: $selection) {
-            Section("Project") {
-                ForEach(SidebarItem.allCases) { item in
-                    Label(item.rawValue, systemImage: item.icon)
-                        .tag(item as SidebarItem?)
+            Section("Plans") {
+                if sortedPlans.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(sortedPlans) { plan in
+                        PlanRowView(plan: plan)
+                            .tag(SidebarItem.plans)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                router.navigate(to: .planEditor(planId: plan.id))
+                            }
+                            .contextMenu {
+                                planContextMenu(for: plan)
+                            }
+                    }
                 }
+            }
+
+            Section {
+                Label("New Plan", systemImage: "plus.square")
+                    .tag(SidebarItem.newPlan)
             }
         }
         .listStyle(.sidebar)
         .navigationTitle("Hoopoe")
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button {
+                    router.navigate(to: .planGeneration)
+                } label: {
+                    Label("New Plan", systemImage: "plus")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .background(.bar)
+        }
+        .confirmationDialog(
+            "Delete Plan",
+            isPresented: Binding(
+                get: { planToDelete != nil },
+                set: { if !$0 { planToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let plan = planToDelete {
+                    deletePlan(plan)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                planToDelete = nil
+            }
+        } message: {
+            if let plan = planToDelete {
+                Text("Are you sure you want to delete \"\(plan.title)\"? This cannot be undone.")
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { planToRename != nil },
+            set: { if !$0 { planToRename = nil } }
+        )) {
+            if let plan = planToRename {
+                renameSheet(for: plan)
+            }
+        }
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 6) {
+            Text("No plans yet")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("Create a new plan or import a .md file.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Context Menu
+
+    @ViewBuilder
+    private func planContextMenu(for plan: PlanDocument) -> some View {
+        Button {
+            renameText = plan.title
+            planToRename = plan
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+
+        if let filePath = plan.filePath {
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([filePath])
+            } label: {
+                Label("Reveal in Finder", systemImage: "folder")
+            }
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            planToDelete = plan
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    // MARK: - Rename Sheet
+
+    private func renameSheet(for plan: PlanDocument) -> some View {
+        VStack(spacing: 16) {
+            Text("Rename Plan")
+                .font(.headline)
+
+            TextField("Plan title", text: $renameText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 280)
+
+            HStack {
+                Button("Cancel") {
+                    planToRename = nil
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Rename") {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        plan.title = trimmed
+                        plan.updatedAt = Date()
+                        try? planStore.save(plan)
+                    }
+                    planToRename = nil
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+    }
+
+    // MARK: - Actions
+
+    private func deletePlan(_ plan: PlanDocument) {
+        let wasSelected = router.currentRoute?.planID == plan.id
+        try? planStore.delete(plan)
+        if wasSelected {
+            router.navigate(to: .plansHome)
+        }
+        planToDelete = nil
+    }
+}
+
+// MARK: - Plan Row View
+
+struct PlanRowView: View {
+    let plan: PlanDocument
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(plan.title)
+                    .font(.callout)
+                    .lineLimit(1)
+
+                Text(plan.updatedAt, style: .relative)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if plan.versions.count > 0 {
+                Text("R\(plan.versions.count)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.secondary, in: Capsule())
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -363,76 +650,143 @@ struct PlanGenerationPlaceholderView: View {
 }
 
 struct PlanEditorRouteView: View {
-    let planId: UUID
+    let plan: PlanDocument
     let router: NavigationRouter
-    @Bindable private var settings = AppSettings.shared
+    private let settings = AppSettings.shared
     @State private var editorProxy = PlanEditorProxy()
     @State private var selectedRange = NSRange(location: 0, length: 0)
-    @State private var planContent = Self.samplePlan
+    @State private var previewMode: PreviewMode = .editorOnly
+    @State private var previewMarkdown = ""
+    @State private var debounceTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Plan Editor")
-                        .font(.title3.weight(.semibold))
-
-                    Text("Selection: \(selectedRange.location):\(selectedRange.length) • \(wordCount) words")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-
-                Spacer()
-
-                Button("Insert Section") {
-                    editorProxy.insertText("\n## New Section\n- Fill this section in\n")
-                }
-                .buttonStyle(.bordered)
-
-                Button("Jump to Architecture") {
-                    editorProxy.scrollToSection("Architecture")
-                }
-                .buttonStyle(.bordered)
-
-                Button("Select Goals") {
-                    editorProxy.selectRange(sectionRange(named: "Goals"))
-                }
-                .buttonStyle(.bordered)
-
-                Button("Refinement") {
-                    router.navigate(to: .refinement(planId: planId))
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Version History") {
-                    router.navigate(to: .versionHistory(planId: planId))
-                }
-                .buttonStyle(.bordered)
-
-                Button("Synthesis") {
-                    router.navigate(to: .multiModelSynthesis(planId: planId))
-                }
-                .buttonStyle(.bordered)
+        editorContent
+            .focusedValue(\.plan, plan)
+            .onAppear { previewMarkdown = plan.content }
+            .onChange(of: plan.content) { _, newValue in
+                debouncePreviewUpdate(newValue)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+    }
+
+    private var editorContent: some View {
+        VStack(spacing: 0) {
+            editorToolbar
 
             Divider()
 
-            PlanEditorRepresentable(
-                text: $planContent,
-                configuration: editorConfiguration,
-                proxy: editorProxy
-            ) { range in
-                selectedRange = range
+            switch previewMode {
+            case .editorOnly:
+                editorPane
+            case .split:
+                HSplitView {
+                    editorPane
+                        .frame(minWidth: 300)
+                    previewPane
+                        .frame(minWidth: 300)
+                }
+            case .previewOnly:
+                previewPane
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Toolbar
+
+    private var editorToolbar: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plan.title)
+                    .font(.title3.weight(.semibold))
+
+                Text("Selection: \(selectedRange.location):\(selectedRange.length) • \(wordCount) words")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Spacer()
+
+            // Preview mode picker
+            Picker("Preview", selection: $previewMode) {
+                ForEach(PreviewMode.allCases, id: \.self) { mode in
+                    Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 200)
+
+            Button("Refinement") {
+                router.navigate(to: .refinement(planId: plan.id))
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Version History") {
+                router.navigate(to: .versionHistory(planId: plan.id))
+            }
+            .buttonStyle(.bordered)
+
+            Button("Synthesis") {
+                router.navigate(to: .multiModelSynthesis(planId: plan.id))
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Editor Pane
+
+    private var editorPane: some View {
+        PlanEditorRepresentable(
+            text: planTextBinding,
+            configuration: editorConfiguration,
+            proxy: editorProxy
+        ) { range in
+            selectedRange = range
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Preview Pane
+
+    private var previewPane: some View {
+        MarkdownPreviewRepresentable(
+            markdown: previewMarkdown,
+            scrollFraction: scrollFraction
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Approximate scroll fraction based on cursor position within the text.
+    private var scrollFraction: CGFloat {
+        let total = max(plan.content.count, 1)
+        return CGFloat(selectedRange.location) / CGFloat(total)
+    }
+
+    private func debouncePreviewUpdate(_ text: String) {
+        debounceTask?.cancel()
+        debounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            previewMarkdown = text
         }
     }
 
     private var wordCount: Int {
-        planContent.split(whereSeparator: \.isWhitespace).count
+        plan.metadata.wordCount
+    }
+
+    private var planTextBinding: Binding<String> {
+        Binding(
+            get: { plan.content },
+            set: { updatedText in
+                guard plan.content != updatedText else {
+                    return
+                }
+                plan.content = updatedText
+                plan.updatedAt = Date()
+            }
+        )
     }
 
     private var editorConfiguration: PlanEditorConfiguration {
@@ -458,37 +812,35 @@ struct PlanEditorRouteView: View {
 
     private func sectionRange(named heading: String) -> NSRange {
         let headingMarker = "## \(heading)"
-        let contentNSString = planContent as NSString
+        let contentNSString = plan.content as NSString
         let match = contentNSString.range(of: headingMarker)
         guard match.location != NSNotFound else {
             return NSRange(location: 0, length: 0)
         }
         return contentNSString.lineRange(for: match)
     }
+}
 
-    private static let samplePlan = """
-    # Hoopoe Planning Sandbox
+struct MissingPlanRouteView: View {
+    let planId: UUID
+    let router: NavigationRouter
 
-    ## Goals
-    - Capture the project vision in a form that can survive multiple refinement rounds.
-    - Keep the editor responsive while long markdown documents grow.
-    - Make section-level navigation easy from surrounding SwiftUI controls.
+    var body: some View {
+        RoutePlaceholderCard(
+            systemImage: "exclamationmark.triangle",
+            title: "Plan Not Found",
+            message: "The selected plan could not be loaded. The editor route now refuses to fall back to unrelated placeholder content."
+        ) {
+            Text(planId.uuidString)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
 
-    ## Constraints
-    - The editing surface is AppKit-backed for performance.
-    - The hosting shell is SwiftUI and should own navigation state.
-    - Cursor position must survive SwiftUI update passes.
-
-    ## Architecture
-    - `PlanEditorRepresentable` bridges SwiftUI into `PlanEditorView`.
-    - `PlanEditorProxy` exposes scroll, insert, and selection commands.
-    - The editor route owns the bound markdown string and secondary controls.
-
-    ## Testing Strategy
-    - Verify typing does not flicker or recreate the editor.
-    - Verify toolbar actions mutate or navigate the AppKit view.
-    - Verify selection state flows back into SwiftUI.
-    """
+            Button("Return to Plans") {
+                router.navigate(to: .plansHome)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
 }
 
 struct RefinementPlaceholderView: View {

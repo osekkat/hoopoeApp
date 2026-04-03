@@ -44,6 +44,24 @@ struct PlanVersionManagerTests {
         #expect(plan.versions[1].content == "version two")
     }
 
+    @Test("createVersion computes convergence metrics for the new version pair")
+    func createVersionComputesConvergenceMetrics() {
+        let store = makeStore()
+        let manager = PlanVersionManager(store: store)
+        let plan = store.createPlan(title: "Test", content: "alpha beta")
+
+        manager.createVersion(for: plan, description: "v1")
+        plan.content = "alpha beta gamma"
+        let version = manager.createVersion(for: plan, description: "v2")
+
+        #expect(plan.convergenceMetrics.count == 1)
+        let metric = plan.metrics(for: version)
+        #expect(metric?.previousRoundNumber == 1)
+        #expect(metric?.currentRoundNumber == 2)
+        #expect(metric?.previousWordCount == 2)
+        #expect(metric?.currentWordCount == 3)
+    }
+
     // MARK: - Provenance Tracking
 
     @Test("createRefinementVersion sets refinement provenance")
@@ -140,6 +158,25 @@ struct PlanVersionManagerTests {
         #expect(plan.versions.count == 2)
     }
 
+    @Test("enforceLimit rebuilds convergence metrics for retained versions only")
+    func enforceLimitRebuildsConvergenceMetrics() {
+        let store = makeStore()
+        let manager = PlanVersionManager(store: store)
+        manager.maxVersionsPerPlan = 2
+
+        let plan = store.createPlan(title: "Test", content: "one")
+        manager.createVersion(for: plan, description: "v1")
+        plan.content = "one two"
+        manager.createVersion(for: plan, description: "v2")
+        plan.content = "one two three"
+        manager.createVersion(for: plan, description: "v3")
+
+        #expect(plan.versions.count == 2)
+        #expect(plan.convergenceMetrics.count == 1)
+        #expect(plan.convergenceMetrics[0].previousRoundNumber == 2)
+        #expect(plan.convergenceMetrics[0].currentRoundNumber == 3)
+    }
+
     // MARK: - Version Queries
 
     @Test("getVersions returns versions sorted by descending createdAt")
@@ -201,8 +238,8 @@ struct PlanVersionManagerTests {
 
     // MARK: - Restore
 
-    @Test("restore sets content to version content and creates backup snapshot")
-    func restoreCreatesBackup() {
+    @Test("restore appends backup and restored versions when current draft is dirty")
+    func restoreCreatesBackupAndRestoredVersion() {
         let store = makeStore()
         let manager = PlanVersionManager(store: store)
         let plan = store.createPlan(title: "Test", content: "original")
@@ -210,23 +247,26 @@ struct PlanVersionManagerTests {
         let v1 = manager.createVersion(for: plan, description: "v1")
         plan.content = "modified"
         manager.createVersion(for: plan, description: "v2")
+        plan.content = "unsaved draft"
 
         let countBefore = plan.versions.count
-        manager.restore(v1, in: plan)
+        let restored = manager.restore(v1, in: plan)
 
-        // Content should be restored to v1's content
         #expect(plan.content == "original")
-        // A backup snapshot should have been created before restoring
-        #expect(plan.versions.count == countBefore + 1)
-        // The backup is the last version added by restore() — it captured
-        // the pre-restore content ("modified") before overwriting
-        let backup = plan.versions[plan.versions.count - 1]
+        #expect(plan.versions.count == countBefore + 2)
+
+        let backup = plan.versions[plan.versions.count - 2]
         #expect(backup.changeDescription.contains("Before restore"))
-        #expect(backup.content == "modified")
+        #expect(backup.content == "unsaved draft")
+
+        let restoredVersion = plan.versions.last!
+        #expect(restoredVersion.id == restored.id)
+        #expect(restoredVersion.changeDescription == "Restored from round 1")
+        #expect(restoredVersion.content == "original")
     }
 
-    @Test("restore backup is the last element, not second-to-last (regression)")
-    func restoreBackupIsLastElement() {
+    @Test("restore appends only the restored version when current content already matches the latest snapshot")
+    func restoreWithoutDirtyDraftAvoidsRedundantBackup() {
         let store = makeStore()
         let manager = PlanVersionManager(store: store)
         let plan = store.createPlan(title: "Test", content: "A")
@@ -234,19 +274,13 @@ struct PlanVersionManagerTests {
         let v1 = manager.createVersion(for: plan, description: "v1")
         plan.content = "B"
         manager.createVersion(for: plan, description: "v2")
-        plan.content = "C"
-        manager.createVersion(for: plan, description: "v3")
 
-        // Restore to v1. restore() adds exactly ONE backup version,
-        // so the backup must be at the very end of the array.
-        manager.restore(v1, in: plan)
+        let countBefore = plan.versions.count
+        let restored = manager.restore(v1, in: plan)
 
-        let lastVersion = plan.versions.last!
-        #expect(lastVersion.changeDescription.contains("Before restore"))
-        #expect(lastVersion.content == "C") // captured pre-restore content
-
-        // The version BEFORE the backup must be v3, not the backup
-        let secondToLast = plan.versions[plan.versions.count - 2]
-        #expect(secondToLast.changeDescription == "v3")
+        #expect(plan.content == "A")
+        #expect(plan.versions.count == countBefore + 1)
+        #expect(plan.versions.last?.id == restored.id)
+        #expect(plan.versions.last?.changeDescription == "Restored from round 1")
     }
 }

@@ -4,6 +4,7 @@ import FoundationNetworking
 #endif
 
 typealias OpenAISleepHandler = @Sendable (TimeInterval) async throws -> Void
+typealias OpenAINowProvider = @Sendable () async -> Date
 
 protocol OpenAIHTTPSession: Sendable {
     func data(for request: URLRequest) async throws -> (Data, URLResponse)
@@ -71,6 +72,7 @@ public struct OpenAIProvider: LLMProvider, Sendable {
     private let baseURL: URL
     private let session: any OpenAIHTTPSession
     private let sleepHandler: OpenAISleepHandler
+    private let nowProvider: OpenAINowProvider
 
     public var isConfigured: Bool { !apiKey.isEmpty }
 
@@ -108,7 +110,8 @@ public struct OpenAIProvider: LLMProvider, Sendable {
             apiKey: apiKey,
             baseURL: baseURL,
             session: URLSession.shared,
-            sleepHandler: Self.defaultSleep
+            sleepHandler: Self.defaultSleep,
+            nowProvider: Self.defaultNow
         )
     }
 
@@ -116,12 +119,14 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         apiKey: String,
         baseURL: URL = URL(string: "https://api.openai.com")!,
         session: any OpenAIHTTPSession,
-        sleepHandler: @escaping OpenAISleepHandler = Self.defaultSleep
+        sleepHandler: @escaping OpenAISleepHandler = Self.defaultSleep,
+        nowProvider: @escaping OpenAINowProvider = Self.defaultNow
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.session = session
         self.sleepHandler = sleepHandler
+        self.nowProvider = nowProvider
     }
 
     public func send(
@@ -161,7 +166,7 @@ public struct OpenAIProvider: LLMProvider, Sendable {
     ) async throws {
         let maxAttempts = 3
         var attempt = 0
-        let startTime = Date()
+        let startTime = await nowProvider()
 
         while true {
             let request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
@@ -294,7 +299,8 @@ public struct OpenAIProvider: LLMProvider, Sendable {
             }
         }
 
-        let latency = Date().timeIntervalSince(startTime)
+        let endTime = await nowProvider()
+        let latency = endTime.timeIntervalSince(startTime)
         let tokenUsage = TokenUsage(inputTokens: inputTokens, outputTokens: outputTokens)
         continuation.yield(.done(LLMResponse(
             fullText: accumulatedText,
@@ -336,7 +342,8 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         let inputTokens = usage["prompt_tokens"] as? Int ?? 0
         let outputTokens = usage["completion_tokens"] as? Int ?? 0
         let tokenUsage = TokenUsage(inputTokens: inputTokens, outputTokens: outputTokens)
-        let latency = Date().timeIntervalSince(startTime)
+        let endTime = await nowProvider()
+        let latency = endTime.timeIntervalSince(startTime)
 
         continuation.yield(.done(LLMResponse(
             fullText: fullText,
@@ -449,5 +456,9 @@ public struct OpenAIProvider: LLMProvider, Sendable {
     private static func defaultSleep(seconds: TimeInterval) async throws {
         let nanoseconds = UInt64(max(seconds, 0) * 1_000_000_000)
         try await Task.sleep(nanoseconds: nanoseconds)
+    }
+
+    private static func defaultNow() async -> Date {
+        Date()
     }
 }

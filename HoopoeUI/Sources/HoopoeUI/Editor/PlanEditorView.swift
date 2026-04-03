@@ -48,6 +48,7 @@ public struct PlanEditorConfiguration {
             && wrapsLines == other.wrapsLines
             && showsLineNumbers == other.showsLineNumbers
             && themeID == other.themeID
+            && markdownTheme.isEquivalent(to: other.markdownTheme)
     }
 }
 

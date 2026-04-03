@@ -107,6 +107,25 @@ final class MarkdownThemeTests: XCTestCase {
             "Adapted body font should honor monospaced configuration"
         )
     }
+
+    func testThemeEquivalenceDetectsSemanticDifferences() {
+        let baseline = MarkdownTheme.light
+        let modified = MarkdownTheme(
+            headingColors: baseline.headingColors,
+            bodyFont: baseline.bodyFont,
+            headingFonts: baseline.headingFonts,
+            codeFont: baseline.codeFont,
+            codeBackground: baseline.codeBackground,
+            emphasisColor: .systemRed,
+            strongColor: baseline.strongColor,
+            linkColor: baseline.linkColor,
+            listMarkerColor: baseline.listMarkerColor,
+            blockquoteColor: baseline.blockquoteColor
+        )
+
+        XCTAssertFalse(baseline.isEquivalent(to: modified))
+        XCTAssertTrue(baseline.isEquivalent(to: .light))
+    }
 }
 
 /// Actor used to verify Sendable conformance at compile time.

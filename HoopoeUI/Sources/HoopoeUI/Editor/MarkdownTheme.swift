@@ -58,7 +58,7 @@ public struct MarkdownTheme: @unchecked Sendable {
             NSColor(calibratedWhite: 0.35, alpha: 1),
         ],
         bodyFont: .systemFont(ofSize: 14),
-        headingFonts: default.headingFonts,
+        headingFonts: `default`.headingFonts,
         codeFont: .monospacedSystemFont(ofSize: 13, weight: .regular),
         codeBackground: NSColor(calibratedWhite: 0.93, alpha: 1),
         emphasisColor: NSColor(calibratedWhite: 0.08, alpha: 1),
@@ -79,7 +79,7 @@ public struct MarkdownTheme: @unchecked Sendable {
             NSColor(calibratedWhite: 0.68, alpha: 1),
         ],
         bodyFont: .systemFont(ofSize: 14),
-        headingFonts: default.headingFonts,
+        headingFonts: `default`.headingFonts,
         codeFont: .monospacedSystemFont(ofSize: 13, weight: .regular),
         codeBackground: NSColor(calibratedWhite: 0.17, alpha: 1),
         emphasisColor: NSColor(calibratedWhite: 0.95, alpha: 1),
@@ -122,6 +122,19 @@ public struct MarkdownTheme: @unchecked Sendable {
         )
     }
 
+    func isEquivalent(to other: MarkdownTheme) -> Bool {
+        colorsMatch(headingColors, other.headingColors)
+            && bodyFont.isEqual(other.bodyFont)
+            && fontsMatch(headingFonts, other.headingFonts)
+            && codeFont.isEqual(other.codeFont)
+            && codeBackground.isEqual(other.codeBackground)
+            && emphasisColor.isEqual(other.emphasisColor)
+            && strongColor.isEqual(other.strongColor)
+            && linkColor.isEqual(other.linkColor)
+            && listMarkerColor.isEqual(other.listMarkerColor)
+            && blockquoteColor.isEqual(other.blockquoteColor)
+    }
+
     /// Returns the font for a heading at the given level (1-based).
     public func headingFont(level: Int) -> NSFont {
         let index = max(0, min(level - 1, headingFonts.count - 1))
@@ -132,5 +145,13 @@ public struct MarkdownTheme: @unchecked Sendable {
     public func headingColor(level: Int) -> NSColor {
         let index = max(0, min(level - 1, headingColors.count - 1))
         return headingColors[index]
+    }
+
+    private func colorsMatch(_ lhs: [NSColor], _ rhs: [NSColor]) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0.isEqual($1) }
+    }
+
+    private func fontsMatch(_ lhs: [NSFont], _ rhs: [NSFont]) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0.isEqual($1) }
     }
 }

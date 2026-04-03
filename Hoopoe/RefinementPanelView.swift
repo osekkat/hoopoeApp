@@ -53,18 +53,28 @@ struct RefinementPanelView: View {
     let plan: PlanDocument
     let versionManager: PlanVersionManager
     let registry: ProviderRegistry
+    var convergenceTracker: ConvergenceTracker = ConvergenceTracker()
 
     @State private var state = RefinementState()
     @State private var selectedProviderId: String?
     @State private var selectedModelId: String?
     @State private var focusAreas = ""
     @State private var refinementRound: Int = 0
+    @State private var showConvergenceMeter = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-            splitContent
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                toolbar
+                Divider()
+                splitContent
+            }
+
+            if showConvergenceMeter {
+                Divider()
+                ConvergenceMeterView(plan: plan, tracker: convergenceTracker)
+                    .frame(width: 200)
+            }
         }
         .onAppear {
             refinementRound = plan.versions.count
@@ -96,6 +106,16 @@ struct RefinementPanelView: View {
             }
 
             actionButtons
+
+            Divider()
+                .frame(height: 20)
+
+            Button {
+                withAnimation { showConvergenceMeter.toggle() }
+            } label: {
+                Label("Convergence", systemImage: "gauge.with.needle")
+            }
+            .help("Toggle convergence meter")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -329,6 +349,7 @@ struct RefinementPanelView: View {
         )
 
         refinementRound += 1
+        convergenceTracker.invalidateCache(for: plan)
         state.phase = .idle
         state.streamingText = ""
     }

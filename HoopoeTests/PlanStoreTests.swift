@@ -16,6 +16,21 @@ struct PlanStoreTests {
         try body(tmp)
     }
 
+    /// Async variant for tests that need to await auto-save behavior.
+    private func withTempDirAsync(_ body: (URL) async throws -> Void) async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HoopoeTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try await body(tmp)
+    }
+
+    private func readData(from url: URL) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        return try handle.readToEnd() ?? Data()
+    }
+
     // MARK: - Save & Load Round-Trip
 
     @Test("Save and load round-trip preserves plan data")
@@ -61,6 +76,57 @@ struct PlanStoreTests {
         }
     }
 
+    @Test("Save preserves convergence metrics in sidecar JSON")
+    func savePreservesConvergenceMetrics() throws {
+        try withTempDir { dir in
+            let store = PlanStore(directory: dir)
+            let plan = store.createPlan(title: "Metrics", content: "one two")
+            plan.snapshot(changeDescription: "Initial")
+            plan.content = "one two three"
+            plan.snapshot(changeDescription: "Expanded")
+
+            try store.save(plan)
+
+            let store2 = PlanStore(directory: dir)
+            try store2.loadAll()
+
+            #expect(store2.plans[0].convergenceMetrics.count == 1)
+            let metric = store2.plans[0].convergenceMetrics[0]
+            #expect(metric.previousRoundNumber == 1)
+            #expect(metric.currentRoundNumber == 2)
+            #expect(abs(metric.sizeDelta - 0.5) < 0.000_1)
+        }
+    }
+
+    @Test("Load tolerates legacy sidecar metadata without convergence metrics")
+    func loadLegacySidecarWithoutConvergenceMetrics() throws {
+        try withTempDir { dir in
+            let store = PlanStore(directory: dir)
+            let plan = store.createPlan(title: "Legacy", content: "one two")
+            plan.snapshot(changeDescription: "Initial")
+            plan.content = "one two three"
+            plan.snapshot(changeDescription: "Expanded")
+            try store.save(plan)
+
+            let metaPath = dir.appendingPathComponent(".Legacy-meta.json")
+            var object = try #require(
+                JSONSerialization.jsonObject(
+                    with: try readData(from: metaPath)
+                ) as? [String: Any]
+            )
+            object.removeValue(forKey: "convergenceMetrics")
+            let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            try legacyData.write(to: metaPath, options: .atomic)
+
+            let store2 = PlanStore(directory: dir)
+            try store2.loadAll()
+
+            #expect(store2.plans.count == 1)
+            #expect(store2.plans[0].convergenceMetrics.isEmpty)
+            #expect(store2.plans[0].versions.count == 2)
+        }
+    }
+
     @Test("Save preserves version provenance in sidecar JSON")
     func savePreservesProvenance() throws {
         try withTempDir { dir in
@@ -83,6 +149,22 @@ struct PlanStoreTests {
             let loaded = store2.plans[0]
             #expect(loaded.versions[0].provenance?.modelName == "claude-opus-4")
             #expect(loaded.versions[0].provenance?.promptType == .generation)
+        }
+    }
+
+    @Test("Save refreshes updatedAt before writing sidecar metadata")
+    func saveRefreshesUpdatedAtBeforeEncodingMetadata() throws {
+        try withTempDir { dir in
+            let store = PlanStore(directory: dir)
+            let plan = store.createPlan(title: "Timestamped", content: "snapshot")
+            let staleDate = Date(timeIntervalSince1970: 123)
+            plan.updatedAt = staleDate
+
+            try store.save(plan)
+
+            let store2 = PlanStore(directory: dir)
+            try store2.loadAll()
+            #expect(store2.plans[0].updatedAt > staleDate)
         }
     }
 
@@ -210,5 +292,29 @@ struct PlanStoreTests {
         let second = store.createPlan(title: "Second")
         #expect(store.plans[0].id == second.id)
         #expect(store.plans[1].id == first.id)
+    }
+
+    @Test("createPlan supports explicit ids for stable routing")
+    func createPlanSupportsExplicitIDs() {
+        let store = PlanStore(directory: FileManager.default.temporaryDirectory)
+        let fixedID = UUID()
+        let plan = store.createPlan(id: fixedID, title: "Stable")
+
+        #expect(plan.id == fixedID)
+        #expect(store.plans[0].id == fixedID)
+    }
+
+    @Test("Auto-save starts during initialization when enabled")
+    func autoSaveStartsDuringInitialization() async throws {
+        try await withTempDirAsync { dir in
+            let store = PlanStore(directory: dir, autoSaveInterval: 0.05)
+            _ = store.createPlan(title: "AutoSaved", content: "# Draft")
+
+            try await Task.sleep(for: .milliseconds(250))
+
+            let mdPath = dir.appendingPathComponent("AutoSaved.md")
+            #expect(FileManager.default.fileExists(atPath: mdPath.path))
+            store.stopAutoSave()
+        }
     }
 }

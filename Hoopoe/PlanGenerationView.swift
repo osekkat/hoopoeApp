@@ -28,21 +28,76 @@ private struct GenerationModelOption: Identifiable, Hashable {
     }
 }
 
-private struct GenerationSession: Identifiable {
-    let id = UUID()
-    let title: String
-    let stream: AsyncThrowingStream<LLMEvent, Error>
+// MARK: - Generation Flow State
+
+@Observable
+@MainActor
+final class GenerationFlowState {
+    enum Phase {
+        case input
+        case generating
+        case complete(text: String)
+        case failed(String)
+    }
+
+    var phase: Phase = .input
+    var streamingText = ""
+    var tokenUsage: TokenUsage?
+    var costEstimate: Double?
+
+    /// Frozen snapshot of the model used for the current generation.
+    var frozenDescription = ""
+    var frozenModelName = ""
+    var frozenModelID = ""
+    var frozenProviderID = ""
+
+    private var streamTask: Task<Void, Never>?
+
+    var isGenerating: Bool {
+        if case .generating = phase { return true }
+        return false
+    }
+
+    var completedText: String? {
+        if case .complete(let text) = phase { return text }
+        return nil
+    }
+
+    func cancel() {
+        streamTask?.cancel()
+        streamTask = nil
+        if case .generating = phase {
+            phase = .input
+            streamingText = ""
+        }
+    }
+
+    func returnToInput() {
+        streamTask?.cancel()
+        streamTask = nil
+        streamingText = ""
+        tokenUsage = nil
+        costEstimate = nil
+        phase = .input
+    }
+
+    func setStreamTask(_ task: Task<Void, Never>) {
+        self.streamTask = task
+    }
 }
 
 // MARK: - Plan Generation View
 
 struct PlanGenerationView: View {
+    let router: NavigationRouter
+    let planStore: PlanStore
+
+    @State private var flowState = GenerationFlowState()
     @State private var projectDescription = ""
     @State private var providerRegistry = ProviderRegistry()
     @State private var selectedModelID: GenerationModelOption.ID?
     @State private var showStructuredFields = false
     @State private var isLoadingProviders = false
-    @State private var generationSession: GenerationSession?
     @State private var providerLoadError: String?
 
     // Optional structured fields
@@ -52,8 +107,23 @@ struct PlanGenerationView: View {
     @State private var repositoryURL = ""
 
     var body: some View {
+        Group {
+            switch flowState.phase {
+            case .input:
+                inputView
+            case .generating, .complete, .failed:
+                splitPaneView
+            }
+        }
+        .task {
+            await refreshProviders()
+        }
+    }
+
+    // MARK: - Input View
+
+    private var inputView: some View {
         VStack(spacing: 0) {
-            // Header
             header
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -61,7 +131,6 @@ struct PlanGenerationView: View {
 
             Divider()
 
-            // Main content
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     descriptionSection
@@ -73,29 +142,11 @@ struct PlanGenerationView: View {
 
             Divider()
 
-            // Footer with generate button
             footer
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task {
-            await refreshProviders()
-        }
-        .sheet(item: $generationSession) { session in
-            NavigationStack {
-                StreamingResponseView(stream: session.stream)
-                    .navigationTitle(session.title)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") {
-                                generationSession = nil
-                            }
-                        }
-                    }
-                    .frame(minWidth: 720, minHeight: 520)
-            }
-        }
     }
 
     // MARK: - Header
@@ -178,7 +229,7 @@ struct PlanGenerationView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Checking configured providers…")
+                    Text("Checking configured providers...")
                         .foregroundStyle(.secondary)
                 }
             } else if hasConfiguredProviders {
@@ -232,13 +283,6 @@ struct PlanGenerationView: View {
 
     private var footer: some View {
         HStack {
-            if generationSession != nil {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Generation session active")
-                    .foregroundStyle(.secondary)
-            }
-
             Spacer()
 
             Button(action: generatePlan) {
@@ -248,6 +292,210 @@ struct PlanGenerationView: View {
             .controlSize(.large)
             .disabled(!canGenerate)
         }
+    }
+
+    // MARK: - Split-Pane View
+
+    private var splitPaneView: some View {
+        VStack(spacing: 0) {
+            splitPaneToolbar
+            Divider()
+            HSplitView {
+                descriptionPane
+                    .frame(minWidth: 300)
+                generatedPlanPane
+                    .frame(minWidth: 300)
+            }
+        }
+    }
+
+    private var splitPaneToolbar: some View {
+        HStack(spacing: 12) {
+            Text("Plan Generation")
+                .font(.headline)
+
+            if flowState.isGenerating {
+                Text("via \(flowState.frozenModelName)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if hasConfiguredProviders {
+                Picker("Model", selection: $selectedModelID) {
+                    ForEach(modelOptions) { option in
+                        Label(option.pickerLabel, systemImage: option.icon)
+                            .tag(Optional(option.id))
+                    }
+                }
+                .frame(maxWidth: 280)
+            }
+
+            Spacer()
+
+            splitPaneActions
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var splitPaneActions: some View {
+        if flowState.completedText != nil {
+            Button {
+                acceptAndEdit()
+            } label: {
+                Label("Accept & Edit", systemImage: "checkmark.circle")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+
+            Button {
+                regenerate()
+            } label: {
+                Label("Regenerate", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.bordered)
+
+            Button("Discard") {
+                flowState.returnToInput()
+            }
+            .buttonStyle(.bordered)
+        }
+
+        if flowState.isGenerating {
+            Button("Cancel") {
+                flowState.cancel()
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+        }
+
+        if case .failed = flowState.phase {
+            Button {
+                regenerate()
+            } label: {
+                Label("Try Again", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Discard") {
+                flowState.returnToInput()
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    // MARK: - Description Pane (Left)
+
+    private var descriptionPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Your Vision")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(flowState.frozenDescription.split(whereSeparator: \.isWhitespace).count) words")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            Divider()
+
+            ScrollView {
+                Text(attributedMarkdown(flowState.frozenDescription))
+                    .textSelection(.enabled)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+        }
+        .background(.background)
+    }
+
+    // MARK: - Generated Plan Pane (Right)
+
+    @ViewBuilder
+    private var generatedPlanPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Generated Plan")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+
+            Divider()
+
+            switch flowState.phase {
+            case .input:
+                EmptyView()
+
+            case .generating:
+                VStack(spacing: 0) {
+                    ScrollView {
+                        Text(flowState.streamingText)
+                            .textSelection(.enabled)
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                    Divider()
+                    streamingStatusBar
+                }
+
+            case .complete(let text):
+                ScrollView {
+                    Text(attributedMarkdown(text))
+                        .textSelection(.enabled)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+
+            case .failed(let message):
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.red)
+                    Text("Generation failed")
+                        .font(.headline)
+                    Text(message)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(.background)
+    }
+
+    private var streamingStatusBar: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Generating plan...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if let usage = flowState.tokenUsage {
+                Text("\(usage.totalTokens) tokens")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let cost = flowState.costEstimate, cost > 0 {
+                Text(String(format: "$%.4f", cost))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 
     // MARK: - Computed Properties
@@ -277,7 +525,7 @@ struct PlanGenerationView: View {
 
     private var canGenerate: Bool {
         !projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && generationSession == nil
+            && !flowState.isGenerating
             && hasConfiguredProviders
             && !isLoadingProviders
     }
@@ -287,21 +535,85 @@ struct PlanGenerationView: View {
     private func generatePlan() {
         guard let selectedModel,
               let provider = providerRegistry.provider(for: selectedModel.providerID)
-        else {
-            return
-        }
+        else { return }
+
+        startGeneration(provider: provider, model: selectedModel)
+    }
+
+    private func regenerate() {
+        guard let selectedModel,
+              let provider = providerRegistry.provider(for: selectedModel.providerID)
+        else { return }
+
+        startGeneration(provider: provider, model: selectedModel)
+    }
+
+    private func startGeneration(provider: any LLMProvider, model: GenerationModelOption) {
+        flowState.cancel()
+        flowState.streamingText = ""
+        flowState.tokenUsage = nil
+        flowState.costEstimate = nil
+        flowState.frozenDescription = projectDescription
+        flowState.frozenModelName = model.modelDisplayName
+        flowState.frozenModelID = model.modelID
+        flowState.frozenProviderID = model.providerID
 
         let stream = provider.send(
             prompt: buildPrompt(),
-            model: selectedModel.modelID,
+            model: model.modelID,
             system: PromptTemplates.planGenerationSystem,
             stream: true
         )
 
-        generationSession = GenerationSession(
-            title: selectedModel.modelDisplayName,
-            stream: stream
+        flowState.phase = .generating
+
+        let task = Task { @MainActor in
+            do {
+                for try await event in stream {
+                    switch event {
+                    case .text(let chunk):
+                        flowState.streamingText += chunk
+                    case .done(let response):
+                        flowState.tokenUsage = response.tokenUsage
+                        flowState.costEstimate = response.costEstimate
+                        flowState.phase = .complete(text: response.fullText)
+                        return
+                    case .error(let error):
+                        flowState.phase = .failed(error.localizedDescription)
+                        return
+                    }
+                }
+                // Stream ended without .done — use accumulated text
+                if case .generating = flowState.phase {
+                    flowState.phase = .complete(text: flowState.streamingText)
+                }
+            } catch is CancellationError {
+                if case .generating = flowState.phase {
+                    flowState.phase = .input
+                }
+            } catch {
+                flowState.phase = .failed(error.localizedDescription)
+            }
+        }
+        flowState.setStreamTask(task)
+    }
+
+    private func acceptAndEdit() {
+        guard let text = flowState.completedText else { return }
+
+        let trimmedName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmedName.isEmpty ? "Generated Plan" : trimmedName
+
+        let plan = planStore.createPlan(title: title, content: text)
+
+        let versionManager = PlanVersionManager(store: planStore)
+        versionManager.createGenerationVersion(
+            for: plan,
+            modelName: flowState.frozenModelName,
+            description: "Initial generation via \(flowState.frozenModelName)"
         )
+
+        router.navigate(to: .planEditor(planId: plan.id))
     }
 
     private func buildPrompt() -> String {
@@ -375,6 +687,15 @@ struct PlanGenerationView: View {
             providerLoadError = error.localizedDescription
         }
     }
+
+    // MARK: - Helpers
+
+    private func attributedMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
 }
 
 // MARK: - Labeled Field
@@ -398,6 +719,9 @@ private struct LabeledField: View {
 // MARK: - Previews
 
 #Preview {
-    PlanGenerationView()
-        .frame(width: 700, height: 600)
+    PlanGenerationView(
+        router: NavigationRouter(),
+        planStore: PlanStore(directory: FileManager.default.temporaryDirectory)
+    )
+    .frame(width: 900, height: 600)
 }

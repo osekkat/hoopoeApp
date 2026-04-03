@@ -129,9 +129,8 @@ final class MarkdownHighlighterTests: XCTestCase {
                 .backgroundColor,
                 in: NSRange(location: codeStart, length: "```\ncode here\n```".utf16.count)
             ) { value, _, _ in
-                if value != nil {
-                    foundCodeBackground = true
-                }
+                guard value != nil else { return }
+                foundCodeBackground = true
             }
             XCTAssertTrue(foundCodeBackground, "Code block after multibyte text should have background")
         }

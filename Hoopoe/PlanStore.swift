@@ -72,12 +72,20 @@ final class PlanStore {
 
     // MARK: - Init
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, autoSaveInterval: TimeInterval = 30) {
         let defaultDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
             .first!
             .appendingPathComponent("Hoopoe Plans", isDirectory: true)
         self.storeDirectory = directory ?? defaultDir
+        self.autoSaveInterval = max(0.01, autoSaveInterval)
         ensureDirectoryExists(storeDirectory)
+        if isAutoSaveEnabled {
+            startAutoSave()
+        }
+    }
+
+    deinit {
+        stopAutoSave()
     }
 
     // MARK: - CRUD Operations
@@ -85,11 +93,12 @@ final class PlanStore {
     /// Creates a new plan and adds it to the store.
     @discardableResult
     func createPlan(
+        id: UUID = UUID(),
         title: String = "Untitled Plan",
         content: String = "",
         type: PlanType = .master
     ) -> PlanDocument {
-        let plan = PlanDocument(title: title, content: content, type: type)
+        let plan = PlanDocument(id: id, title: title, content: content, type: type)
         plans.insert(plan, at: 0)
         return plan
     }
@@ -98,6 +107,16 @@ final class PlanStore {
     func save(_ plan: PlanDocument) throws {
         let mdURL = markdownURL(for: plan)
         let metaURL = metadataURL(for: plan)
+        let previousUpdatedAt = plan.updatedAt
+        let previousFilePath = plan.filePath
+
+        func restoreSaveState() {
+            plan.updatedAt = previousUpdatedAt
+            plan.filePath = previousFilePath
+        }
+
+        plan.updatedAt = Date()
+        plan.filePath = mdURL
 
         // Write markdown content using file coordination
         let coordinator = NSFileCoordinator()
@@ -113,12 +132,14 @@ final class PlanStore {
         }
 
         if let error = coordinatorError {
+            restoreSaveState()
             let storeError = PlanStoreError.saveFailed(mdURL, error)
             lastError = storeError
             throw storeError
         }
 
         if let error = innerWriteError {
+            restoreSaveState()
             let storeError = PlanStoreError.saveFailed(mdURL, error)
             lastError = storeError
             throw storeError
@@ -133,16 +154,10 @@ final class PlanStore {
             let data = try encoder.encode(metadata)
             try data.write(to: metaURL, options: .atomic)
         } catch {
+            restoreSaveState()
             let storeError = PlanStoreError.saveFailed(metaURL, error)
             lastError = storeError
             throw storeError
-        }
-
-        plan.updatedAt = Date()
-        if let path = plan.filePath, path != mdURL {
-            plan.filePath = mdURL
-        } else if plan.filePath == nil {
-            plan.filePath = mdURL
         }
     }
 
@@ -187,7 +202,11 @@ final class PlanStore {
 
         let content: String
         do {
-            content = try String(contentsOf: mdURL, encoding: .utf8)
+            let data = try readData(from: mdURL)
+            guard let decoded = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadInapplicableStringEncoding)
+            }
+            content = decoded
         } catch {
             throw PlanStoreError.loadFailed(mdURL, error)
         }
@@ -198,7 +217,7 @@ final class PlanStore {
         let metaURL = metadataURLForMarkdownFile(mdURL)
         if fm.fileExists(atPath: metaURL.path) {
             do {
-                let data = try Data(contentsOf: metaURL)
+                let data = try readData(from: metaURL)
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
                 let metadata = try decoder.decode(PlanSidecarMetadata.self, from: data)
@@ -211,7 +230,8 @@ final class PlanStore {
                     createdAt: metadata.createdAt,
                     updatedAt: metadata.updatedAt,
                     filePath: mdURL,
-                    versions: metadata.versions
+                    versions: metadata.versions,
+                    convergenceMetrics: metadata.convergenceMetrics
                 )
             } catch {
                 lastError = .decodingFailed(metaURL, error)
@@ -272,9 +292,10 @@ final class PlanStore {
         stopAutoSave()
         autoSaveTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(self?.autoSaveInterval ?? 30))
+                guard let self else { break }
+                try? await Task.sleep(for: .seconds(self.autoSaveInterval))
                 guard !Task.isCancelled else { break }
-                self?.saveAllDirty()
+                self.saveAllDirty()
             }
         }
     }
@@ -302,6 +323,12 @@ final class PlanStore {
         return dir.appendingPathComponent(".\(name)-meta.json")
     }
 
+    private func readData(from url: URL) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        return try handle.readToEnd() ?? Data()
+    }
+
     private func ensureDirectoryExists(_ url: URL) {
         let fm = FileManager.default
         if !fm.fileExists(atPath: url.path) {
@@ -324,6 +351,11 @@ private struct PlanSidecarMetadata: Codable {
     let createdAt: Date
     let updatedAt: Date
     let versions: [PlanVersion]
+    let convergenceMetrics: [ConvergenceVersionPairMetrics]
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, type, createdAt, updatedAt, versions, convergenceMetrics
+    }
 
     init(from plan: PlanDocument) {
         self.id = plan.id
@@ -332,5 +364,20 @@ private struct PlanSidecarMetadata: Codable {
         self.createdAt = plan.createdAt
         self.updatedAt = plan.updatedAt
         self.versions = plan.versions
+        self.convergenceMetrics = plan.convergenceMetrics
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        type = try container.decode(PlanType.self, forKey: .type)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        versions = try container.decode([PlanVersion].self, forKey: .versions)
+        convergenceMetrics = try container.decodeIfPresent(
+            [ConvergenceVersionPairMetrics].self,
+            forKey: .convergenceMetrics
+        ) ?? []
     }
 }

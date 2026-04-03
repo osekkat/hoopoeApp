@@ -16,6 +16,7 @@ struct PlanDocumentTests {
         #expect(plan.content.isEmpty)
         #expect(plan.type == .master)
         #expect(plan.versions.isEmpty)
+        #expect(plan.convergenceMetrics.isEmpty)
         #expect(plan.filePath == nil)
     }
 
@@ -74,6 +75,27 @@ struct PlanDocumentTests {
         #expect(plan.versions.count == 2)
         #expect(plan.versions[1].content == "v2 content")
         #expect(plan.versions[1].roundNumber == 2)
+    }
+
+    @Test("Snapshot computes convergence metrics for consecutive versions")
+    func snapshotComputesConvergenceMetrics() {
+        let plan = PlanDocument(content: "alpha beta gamma")
+        plan.snapshot(changeDescription: "Initial")
+
+        plan.content = "alpha beta gamma\ndelta epsilon"
+        plan.snapshot(changeDescription: "Expanded")
+
+        #expect(plan.convergenceMetrics.count == 1)
+        let metric = plan.convergenceMetrics[0]
+        #expect(metric.previousRoundNumber == 1)
+        #expect(metric.currentRoundNumber == 2)
+        #expect(metric.previousWordCount == 3)
+        #expect(metric.currentWordCount == 5)
+        #expect(abs(metric.sizeDelta - (2.0 / 3.0)) < 0.000_1)
+        #expect(metric.changeVelocity > 0)
+        #expect(metric.contentSimilarity > 0)
+        #expect(metric.compositeScore >= 0)
+        #expect(metric.compositeScore <= 1)
     }
 
     // MARK: - Codable Round-Trip
@@ -156,6 +178,69 @@ struct PlanDocumentTests {
         let decoded = try JSONDecoder().decode(PlanVersion.self, from: data)
 
         #expect(decoded.provenance == nil)
+    }
+}
+
+// MARK: - Convergence Metrics Tests
+
+@Suite("ConvergenceMetricsBackfill")
+struct ConvergenceMetricsBackfillTests {
+    @Test("Identical versions produce a fully converged score")
+    func identicalVersionsFullyConverged() {
+        let planId = UUID()
+        let previous = PlanVersion(
+            planId: planId,
+            content: "# Plan\n\nStable content",
+            roundNumber: 1,
+            changeDescription: "Initial"
+        )
+        let current = PlanVersion(
+            planId: planId,
+            content: "# Plan\n\nStable content",
+            roundNumber: 2,
+            changeDescription: "No-op revision"
+        )
+
+        let metrics = ConvergenceVersionPairMetrics(previous: previous, current: current)
+
+        #expect(metrics.sizeDelta == 0)
+        #expect(metrics.changeVelocity == 0)
+        #expect(metrics.contentSimilarity == 1)
+        #expect(metrics.compositeScore == 1)
+    }
+
+    @Test("ConvergenceTracker backfills missing metrics lazily")
+    func trackerBackfillsMissingMetrics() {
+        let plan = PlanDocument(content: "Current")
+        let v1 = PlanVersion(
+            planId: plan.id,
+            content: "alpha beta",
+            roundNumber: 1,
+            changeDescription: "v1"
+        )
+        let v2 = PlanVersion(
+            planId: plan.id,
+            content: "alpha beta gamma",
+            roundNumber: 2,
+            changeDescription: "v2"
+        )
+        let v3 = PlanVersion(
+            planId: plan.id,
+            content: "alpha beta gamma delta",
+            roundNumber: 3,
+            changeDescription: "v3"
+        )
+        plan.versions = [v1, v2, v3]
+        plan.convergenceMetrics = []
+
+        let tracker = ConvergenceTracker()
+        let metrics = tracker.computeAllMetrics(for: plan)
+
+        #expect(plan.convergenceMetrics.count == 2)
+        #expect(metrics.count == 2)
+        #expect(metrics.last?.currentRoundNumber == 3)
+        #expect(tracker.latestConvergenceScore(for: plan) != nil)
+        #expect(tracker.hasConverged(plan: plan, threshold: 0) == true)
     }
 }
 

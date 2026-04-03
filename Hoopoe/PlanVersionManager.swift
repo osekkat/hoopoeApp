@@ -9,6 +9,8 @@ import Observation
 final class PlanVersionManager {
     /// Maximum number of versions to retain per plan. Oldest versions are evicted first.
     var maxVersionsPerPlan: Int = 50
+    /// Centralized weights so the convergence formula is easy to tune in one place.
+    var convergenceWeights: ConvergenceWeights = .default
 
     private let store: PlanStore
 
@@ -33,8 +35,7 @@ final class PlanVersionManager {
             provenance: provenance
         )
 
-        plan.versions.append(version)
-        plan.updatedAt = Date()
+        plan.appendVersion(version, convergenceWeights: convergenceWeights)
 
         // Enforce version limit
         enforceLimit(for: plan)
@@ -117,18 +118,23 @@ final class PlanVersionManager {
         plan.versions.max(by: { $0.roundNumber < $1.roundNumber })
     }
 
-    /// Restores a plan's content to a previous version.
-    func restore(_ version: PlanVersion, in plan: PlanDocument) {
-        // Create a snapshot of the current state before restoring
-        createVersion(
-            for: plan,
-            description: "Before restore to round \(version.roundNumber)",
-            provenance: VersionProvenance(modelName: "user", promptType: .manual)
-        )
+    /// Restores a plan's content to a previous version and records the restore as a new snapshot.
+    @discardableResult
+    func restore(_ version: PlanVersion, in plan: PlanDocument) -> PlanVersion {
+        if plan.isDirty {
+            createVersion(
+                for: plan,
+                description: "Before restore to round \(version.roundNumber)",
+                provenance: VersionProvenance(modelName: "user", promptType: .manual)
+            )
+        }
 
         plan.content = version.content
-        plan.updatedAt = Date()
-        try? store.save(plan)
+        return createVersion(
+            for: plan,
+            description: "Restored from round \(version.roundNumber)",
+            provenance: VersionProvenance(modelName: "user", promptType: .manual)
+        )
     }
 
     // MARK: - Limit Enforcement
@@ -140,5 +146,6 @@ final class PlanVersionManager {
         let sorted = plan.versions.sorted { $0.roundNumber < $1.roundNumber }
         let toRemove = Set(sorted.prefix(excess).map(\.id))
         plan.versions.removeAll { toRemove.contains($0.id) }
+        plan.rebuildConvergenceMetrics(weights: convergenceWeights)
     }
 }
