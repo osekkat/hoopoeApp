@@ -3,6 +3,62 @@ import Foundation
 import FoundationNetworking
 #endif
 
+typealias OpenAISleepHandler = @Sendable (TimeInterval) async throws -> Void
+
+protocol OpenAIHTTPSession: Sendable {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse)
+    func stream(for request: URLRequest) async throws -> OpenAIHTTPStreamResponse
+}
+
+struct OpenAIHTTPStreamResponse: Sendable {
+    let response: URLResponse
+    let errorBody: Data?
+    let lines: AsyncThrowingStream<String, Error>
+}
+
+extension URLSession: OpenAIHTTPSession {
+    func stream(for request: URLRequest) async throws -> OpenAIHTTPStreamResponse {
+        let (bytes, response) = try await bytes(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200 ... 299).contains(httpResponse.statusCode) {
+            var errorBody = Data()
+            for try await byte in bytes {
+                errorBody.append(byte)
+            }
+
+            return OpenAIHTTPStreamResponse(
+                response: response,
+                errorBody: errorBody,
+                lines: AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
+            )
+        }
+
+        return OpenAIHTTPStreamResponse(
+            response: response,
+            errorBody: nil,
+            lines: AsyncThrowingStream { continuation in
+                let task = Task {
+                    do {
+                        for try await line in bytes.lines {
+                            continuation.yield(line)
+                        }
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+
+                continuation.onTermination = { @Sendable _ in
+                    task.cancel()
+                }
+            }
+        )
+    }
+}
+
 /// LLM provider for OpenAI's Chat Completions API.
 ///
 /// Uses URLSession with SSE streaming. API key is injected at construction;
@@ -13,6 +69,8 @@ public struct OpenAIProvider: LLMProvider, Sendable {
 
     private let apiKey: String
     private let baseURL: URL
+    private let session: any OpenAIHTTPSession
+    private let sleepHandler: OpenAISleepHandler
 
     public var isConfigured: Bool { !apiKey.isEmpty }
 
@@ -46,8 +104,24 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         apiKey: String,
         baseURL: URL = URL(string: "https://api.openai.com")!
     ) {
+        self.init(
+            apiKey: apiKey,
+            baseURL: baseURL,
+            session: URLSession.shared,
+            sleepHandler: Self.defaultSleep
+        )
+    }
+
+    init(
+        apiKey: String,
+        baseURL: URL = URL(string: "https://api.openai.com")!,
+        session: any OpenAIHTTPSession,
+        sleepHandler: @escaping OpenAISleepHandler = Self.defaultSleep
+    ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.session = session
+        self.sleepHandler = sleepHandler
     }
 
     public func send(
@@ -59,24 +133,13 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let startTime = Date()
-                    let request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
-
-                    if stream {
-                        try await streamResponse(
-                            request: request,
-                            model: model,
-                            startTime: startTime,
-                            continuation: continuation
-                        )
-                    } else {
-                        try await nonStreamResponse(
-                            request: request,
-                            model: model,
-                            startTime: startTime,
-                            continuation: continuation
-                        )
-                    }
+                    try await executeWithRetry(
+                        prompt: prompt,
+                        model: model,
+                        system: system,
+                        stream: stream,
+                        continuation: continuation
+                    )
                 } catch {
                     continuation.yield(.error(mapError(error)))
                     continuation.finish()
@@ -85,6 +148,50 @@ public struct OpenAIProvider: LLMProvider, Sendable {
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
+            }
+        }
+    }
+
+    private func executeWithRetry(
+        prompt: String,
+        model: String,
+        system: String?,
+        stream: Bool,
+        continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation
+    ) async throws {
+        let maxAttempts = 3
+        var attempt = 0
+
+        while true {
+            let startTime = Date()
+            let request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
+
+            do {
+                if stream {
+                    try await streamResponse(
+                        request: request,
+                        model: model,
+                        startTime: startTime,
+                        continuation: continuation
+                    )
+                } else {
+                    try await nonStreamResponse(
+                        request: request,
+                        model: model,
+                        startTime: startTime,
+                        continuation: continuation
+                    )
+                }
+                return
+            } catch let error as LLMError {
+                guard case let .rateLimited(retryAfter) = error, attempt < maxAttempts - 1 else {
+                    throw error
+                }
+
+                attempt += 1
+                try await sleepForRetry(seconds: retryDelaySeconds(retryAfter: retryAfter, attempt: attempt))
+            } catch {
+                throw error
             }
         }
     }
@@ -136,24 +243,27 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         startTime: Date,
         continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation
     ) async throws {
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let streamResponse = try await session.stream(for: request)
+        let response = streamResponse.response
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LLMError.networkError(message: "Invalid response")
         }
 
-        try checkHTTPStatus(httpResponse)
+        if !(200 ... 299).contains(httpResponse.statusCode) {
+            try checkHTTPStatus(httpResponse, responseBody: streamResponse.errorBody)
+        }
 
         var accumulatedText = ""
         var inputTokens = 0
         var outputTokens = 0
 
-        for try await line in bytes.lines {
+        for try await line in streamResponse.lines {
             try Task.checkCancellation()
 
             guard line.hasPrefix("data: ") else { continue }
             let payload = String(line.dropFirst(6))
-            guard payload != "[DONE]" else { continue }
+            guard payload != "[DONE]" else { break }
 
             guard let data = payload.data(using: .utf8),
                   let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -176,15 +286,9 @@ public struct OpenAIProvider: LLMProvider, Sendable {
             let choices = event["choices"] as? [[String: Any]] ?? []
             for choice in choices {
                 if let delta = choice["delta"] as? [String: Any] {
-                    if let text = delta["content"] as? String, !text.isEmpty {
+                    for text in textSegments(from: delta["content"]) {
                         accumulatedText += text
                         continuation.yield(.text(text))
-                    } else if let contentParts = delta["content"] as? [[String: Any]] {
-                        for part in contentParts {
-                            guard let text = part["text"] as? String, !text.isEmpty else { continue }
-                            accumulatedText += text
-                            continuation.yield(.text(text))
-                        }
                     }
                 }
             }
@@ -210,7 +314,7 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         startTime: Date,
         continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation
     ) async throws {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LLMError.networkError(message: "Invalid response")
@@ -225,7 +329,7 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         let choices = json["choices"] as? [[String: Any]] ?? []
         let fullText = choices.compactMap { choice -> String? in
             guard let message = choice["message"] as? [String: Any] else { return nil }
-            return message["content"] as? String
+            return textSegments(from: message["content"]).joined()
         }.joined()
 
         let usage = json["usage"] as? [String: Any] ?? [:]
@@ -257,22 +361,59 @@ public struct OpenAIProvider: LLMProvider, Sendable {
                 .flatMap(TimeInterval.init)
             throw LLMError.rateLimited(retryAfter: retryAfter)
         case 400:
-            if let responseBody,
-               let bodyString = String(data: responseBody, encoding: .utf8),
+            if let bodyString = errorResponseMessage(from: responseBody),
                bodyString.localizedCaseInsensitiveContains("context") {
                 throw LLMError.contextTooLong
             }
             fallthrough
         default:
             let message: String
-            if let responseBody,
-               let bodyString = String(data: responseBody, encoding: .utf8),
+            if let bodyString = errorResponseMessage(from: responseBody),
                !bodyString.isEmpty {
                 message = bodyString
             } else {
                 message = "HTTP \(response.statusCode)"
             }
             throw LLMError.serverError(message: message)
+        }
+    }
+
+    private func errorResponseMessage(from responseBody: Data?) -> String? {
+        guard let responseBody, !responseBody.isEmpty else {
+            return nil
+        }
+
+        if let json = try? JSONSerialization.jsonObject(with: responseBody) as? [String: Any],
+           let error = json["error"] as? [String: Any],
+           let message = error["message"] as? String,
+           !message.isEmpty {
+            return message
+        }
+
+        return String(data: responseBody, encoding: .utf8)
+    }
+
+    private func textSegments(from content: Any?) -> [String] {
+        if let text = content as? String, !text.isEmpty {
+            return [text]
+        }
+
+        guard let contentParts = content as? [[String: Any]] else {
+            return []
+        }
+
+        return contentParts.compactMap { part in
+            if let text = part["text"] as? String, !text.isEmpty {
+                return text
+            }
+
+            if let textObject = part["text"] as? [String: Any],
+               let value = textObject["value"] as? String,
+               !value.isEmpty {
+                return value
+            }
+
+            return nil
         }
     }
 
@@ -287,9 +428,26 @@ public struct OpenAIProvider: LLMProvider, Sendable {
         model.hasPrefix("o")
     }
 
+    private func retryDelaySeconds(retryAfter: TimeInterval?, attempt: Int) -> TimeInterval {
+        if let retryAfter, retryAfter > 0 {
+            return retryAfter
+        }
+
+        return min(pow(2, Double(attempt)), 8)
+    }
+
+    private func sleepForRetry(seconds: TimeInterval) async throws {
+        try await sleepHandler(seconds)
+    }
+
     private func mapError(_ error: Error) -> LLMError {
         if let llmError = error as? LLMError { return llmError }
         if error is CancellationError { return .networkError(message: "Request cancelled") }
         return .networkError(message: error.localizedDescription)
+    }
+
+    private static func defaultSleep(seconds: TimeInterval) async throws {
+        let nanoseconds = UInt64(max(seconds, 0) * 1_000_000_000)
+        try await Task.sleep(nanoseconds: nanoseconds)
     }
 }

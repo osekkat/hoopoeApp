@@ -1,3 +1,4 @@
+import HoopoeUI
 import Observation
 import SwiftUI
 
@@ -364,19 +365,41 @@ struct PlanGenerationPlaceholderView: View {
 struct PlanEditorRouteView: View {
     let planId: UUID
     let router: NavigationRouter
+    @Bindable private var settings = AppSettings.shared
+    @State private var editorProxy = PlanEditorProxy()
+    @State private var selectedRange = NSRange(location: 0, length: 0)
+    @State private var planContent = Self.samplePlan
 
     var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "square.and.pencil",
-            title: "Plan Editor",
-            message: "Programmatic child navigation for refinement, synthesis, and version history hangs off the editor route."
-        ) {
-            Text(planId.uuidString)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Plan Editor")
+                        .font(.title3.weight(.semibold))
 
-            HStack {
+                    Text("Selection: \(selectedRange.location):\(selectedRange.length) • \(wordCount) words")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Spacer()
+
+                Button("Insert Section") {
+                    editorProxy.insertText("\n## New Section\n- Fill this section in\n")
+                }
+                .buttonStyle(.bordered)
+
+                Button("Jump to Architecture") {
+                    editorProxy.scrollToSection("Architecture")
+                }
+                .buttonStyle(.bordered)
+
+                Button("Select Goals") {
+                    editorProxy.selectRange(sectionRange(named: "Goals"))
+                }
+                .buttonStyle(.bordered)
+
                 Button("Refinement") {
                     router.navigate(to: .refinement(planId: planId))
                 }
@@ -392,8 +415,67 @@ struct PlanEditorRouteView: View {
                 }
                 .buttonStyle(.bordered)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            PlanEditorRepresentable(
+                text: $planContent,
+                configuration: editorConfiguration,
+                proxy: editorProxy
+            ) { range in
+                selectedRange = range
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+
+    private var wordCount: Int {
+        planContent.split(whereSeparator: \.isWhitespace).count
+    }
+
+    private var editorConfiguration: PlanEditorConfiguration {
+        PlanEditorConfiguration(
+            fontSize: CGFloat(settings.editorFontSize),
+            wrapsLines: settings.editorLineWrapping,
+            showsLineNumbers: settings.editorShowLineNumbers
+        )
+    }
+
+    private func sectionRange(named heading: String) -> NSRange {
+        let headingMarker = "## \(heading)"
+        let contentNSString = planContent as NSString
+        let match = contentNSString.range(of: headingMarker)
+        guard match.location != NSNotFound else {
+            return NSRange(location: 0, length: 0)
+        }
+        return contentNSString.lineRange(for: match)
+    }
+
+    private static let samplePlan = """
+    # Hoopoe Planning Sandbox
+
+    ## Goals
+    - Capture the project vision in a form that can survive multiple refinement rounds.
+    - Keep the editor responsive while long markdown documents grow.
+    - Make section-level navigation easy from surrounding SwiftUI controls.
+
+    ## Constraints
+    - The editing surface is AppKit-backed for performance.
+    - The hosting shell is SwiftUI and should own navigation state.
+    - Cursor position must survive SwiftUI update passes.
+
+    ## Architecture
+    - `PlanEditorRepresentable` bridges SwiftUI into `PlanEditorView`.
+    - `PlanEditorProxy` exposes scroll, insert, and selection commands.
+    - The editor route owns the bound markdown string and secondary controls.
+
+    ## Testing Strategy
+    - Verify typing does not flicker or recreate the editor.
+    - Verify toolbar actions mutate or navigate the AppKit view.
+    - Verify selection state flows back into SwiftUI.
+    """
 }
 
 struct RefinementPlaceholderView: View {

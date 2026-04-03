@@ -24,5 +24,11 @@ let package = Package(
                 .product(name: "TreeSitterMarkdown", package: "tree-sitter-markdown"),
             ]
         ),
+        .testTarget(
+            name: "HoopoeUITests",
+            dependencies: [
+                "HoopoeUI",
+            ]
+        ),
     ]
 )

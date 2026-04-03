@@ -1,3 +1,5 @@
+import HoopoeUtils
+import Security
 import SwiftUI
 
 // MARK: - Settings Tabs
@@ -41,7 +43,7 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.editor)
         }
-        .frame(width: 480, height: 320)
+        .frame(width: 520, height: 440)
     }
 }
 
@@ -100,36 +102,261 @@ struct GeneralSettingsTab: View {
 
 struct ProvidersSettingsTab: View {
     var body: some View {
-        Form {
-            Section("API Keys") {
-                Text("Provider API key configuration will be available in a future update.")
-                    .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 16) {
+                ProviderSection(
+                    providerName: "Claude (Anthropic)",
+                    providerKey: KeychainService.Provider.anthropic.rawValue,
+                    icon: "brain.head.profile",
+                    keyHint: "sk-ant-..."
+                )
+                ProviderSection(
+                    providerName: "OpenAI (GPT)",
+                    providerKey: KeychainService.Provider.openai.rawValue,
+                    icon: "sparkles",
+                    keyHint: "sk-..."
+                )
+                ProviderSection(
+                    providerName: "Google (Gemini)",
+                    providerKey: KeychainService.Provider.google.rawValue,
+                    icon: "globe",
+                    keyHint: "AI..."
+                )
+            }
+            .padding()
+        }
+    }
+}
 
-                // Placeholder structure for the three providers
-                GroupBox("Claude (Anthropic)") {
-                    Text("Not configured")
+// MARK: - Provider Section
+
+private struct ProviderSection: View {
+    let providerName: String
+    let providerKey: String
+    let icon: String
+    let keyHint: String
+
+    @State private var keys: [ProviderKeyEntry] = []
+    @State private var newKeyText = ""
+    @State private var newKeyAccount = "default"
+    @State private var isExpanded = true
+    @State private var validationMessage: String?
+
+    private let keychain = KeychainService()
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                // Existing keys
+                if keys.isEmpty {
+                    Text("No API keys configured")
                         .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.callout)
                         .padding(.vertical, 4)
+                } else {
+                    ForEach(keys) { entry in
+                        ProviderKeyRow(
+                            entry: entry,
+                            isPrimary: entry.account == "default",
+                            onMakePrimary: { makePrimary(entry) },
+                            onDelete: { deleteKey(entry) }
+                        )
+                    }
                 }
 
-                GroupBox("OpenAI (GPT)") {
-                    Text("Not configured")
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
+                Divider()
+
+                // Add new key
+                HStack(spacing: 8) {
+                    SecureField(keyHint, text: $newKeyText)
+                        .textFieldStyle(.roundedBorder)
+
+                    if keys.count > 0 {
+                        TextField("Label", text: $newKeyAccount)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                    }
+
+                    Button {
+                        addKey()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .disabled(newKeyText.isEmpty)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.green)
+
+                    Button("Test") {
+                        validateKey()
+                    }
+                    .disabled(newKeyText.isEmpty)
+                    .controlSize(.small)
                 }
 
-                GroupBox("Google (Gemini)") {
-                    Text("Not configured")
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
+                if let message = validationMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(message.contains("Valid") ? .green : .red)
                 }
             }
+            .padding(.leading, 4)
+        } label: {
+            Label(providerName, systemImage: icon)
+                .font(.headline)
         }
-        .formStyle(.grouped)
-        .padding()
+        .padding(12)
+        .background(.background.secondary)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .task { await loadKeys() }
+    }
+
+    private func loadKeys() async {
+        do {
+            let accounts = try await keychain.listAccounts(provider: providerKey)
+            keys = accounts.map { credential in
+                ProviderKeyEntry(
+                    account: credential.account,
+                    maskedKey: maskedKey(for: credential.account)
+                )
+            }
+        } catch {
+            keys = []
+        }
+    }
+
+    private func maskedKey(for account: String) -> String {
+        do {
+            let secret = try blockingRetrieve(account: account)
+            if secret.count > 4 {
+                return "..." + String(secret.suffix(4))
+            }
+            return "****"
+        } catch {
+            return "****"
+        }
+    }
+
+    private func blockingRetrieve(account: String) throws -> String {
+        // KeychainService is an actor; we call synchronously via a helper
+        // In real use this would be async; for display we use the nonisolated path
+        let service = "com.hoopoe.api-key.\(providerKey)"
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let secret = String(data: data, encoding: .utf8) else {
+            return "****"
+        }
+        return secret
+    }
+
+    private func addKey() {
+        let account = keys.isEmpty ? "default" : newKeyAccount
+        Task {
+            do {
+                try await keychain.upsert(secret: newKeyText, provider: providerKey, account: account)
+                newKeyText = ""
+                newKeyAccount = "default"
+                validationMessage = nil
+                await loadKeys()
+            } catch {
+                validationMessage = "Failed to save: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func deleteKey(_ entry: ProviderKeyEntry) {
+        Task {
+            do {
+                try await keychain.delete(provider: providerKey, account: entry.account)
+                await loadKeys()
+            } catch {
+                validationMessage = "Failed to delete: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func makePrimary(_ entry: ProviderKeyEntry) {
+        // Swap the selected key to the "default" account
+        Task {
+            do {
+                let secret = try await keychain.retrieve(provider: providerKey, account: entry.account)
+                try await keychain.delete(provider: providerKey, account: entry.account)
+                try await keychain.upsert(secret: secret, provider: providerKey, account: "default")
+                await loadKeys()
+            } catch {
+                validationMessage = "Failed to set primary: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func validateKey() {
+        Task {
+            let isValid = await keychain.validateKeyFormat(key: newKeyText, provider: providerKey)
+            validationMessage = isValid ? "Valid format" : "Invalid format for \(providerName)"
+        }
+    }
+}
+
+// MARK: - Provider Key Entry
+
+private struct ProviderKeyEntry: Identifiable {
+    let account: String
+    let maskedKey: String
+    var id: String { account }
+}
+
+// MARK: - Provider Key Row
+
+private struct ProviderKeyRow: View {
+    let entry: ProviderKeyEntry
+    let isPrimary: Bool
+    let onMakePrimary: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isRevealed = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Primary indicator
+            Button {
+                if !isPrimary { onMakePrimary() }
+            } label: {
+                Image(systemName: isPrimary ? "star.fill" : "star")
+                    .foregroundStyle(isPrimary ? .yellow : .tertiary)
+            }
+            .buttonStyle(.plain)
+            .help(isPrimary ? "Primary key" : "Make primary")
+
+            // Account label
+            Text(entry.account)
+                .font(.callout)
+                .frame(width: 60, alignment: .leading)
+
+            // Masked/revealed key
+            Text(entry.maskedKey)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            // Delete button
+            Button {
+                onDelete()
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 2)
     }
 }
 

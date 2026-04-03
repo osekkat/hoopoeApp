@@ -102,16 +102,23 @@ final class PlanStore {
         // Write markdown content using file coordination
         let coordinator = NSFileCoordinator()
         var coordinatorError: NSError?
+        var innerWriteError: Error?
 
         coordinator.coordinate(writingItemAt: mdURL, options: .forReplacing, error: &coordinatorError) { url in
             do {
                 try plan.content.write(to: url, atomically: true, encoding: .utf8)
             } catch {
-                self.lastError = .saveFailed(url, error)
+                innerWriteError = error
             }
         }
 
         if let error = coordinatorError {
+            let storeError = PlanStoreError.saveFailed(mdURL, error)
+            lastError = storeError
+            throw storeError
+        }
+
+        if let error = innerWriteError {
             let storeError = PlanStoreError.saveFailed(mdURL, error)
             lastError = storeError
             throw storeError

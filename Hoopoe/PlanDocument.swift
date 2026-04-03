@@ -39,7 +39,8 @@ final class PlanDocument: Identifiable {
 
     /// Computed metadata derived from the current content and version history.
     var metadata: PlanMetadata {
-        PlanMetadata(content: content, versions: versions)
+        let lastModel = versions.last(where: { $0.provenance != nil })?.provenance?.modelName
+        return PlanMetadata(content: content, versions: versions, lastModelUsed: lastModel)
     }
 
     init(

@@ -1,42 +1,55 @@
+import HoopoeUI
+import HoopoeUtils
 import SwiftUI
 
-// MARK: - LLM Provider (placeholder for br-2bf.21 integration)
+private struct GenerationModelOption: Identifiable, Hashable {
+    let providerID: String
+    let providerName: String
+    let modelID: String
+    let modelDisplayName: String
 
-/// Available LLM providers for plan generation.
-/// Populated from configured API keys once provider beads land.
-enum LLMProvider: String, CaseIterable, Identifiable, Sendable {
-    case claudeOpus = "Claude Opus"
-    case claudeSonnet = "Claude Sonnet"
-    case gpt4o = "GPT-4o"
-    case geminiPro = "Gemini Pro"
+    var id: String { "\(providerID)::\(modelID)" }
 
-    var id: String { rawValue }
+    var pickerLabel: String {
+        "\(modelDisplayName) · \(providerName)"
+    }
 
     var icon: String {
-        switch self {
-        case .claudeOpus, .claudeSonnet: "brain"
-        case .gpt4o: "sparkle"
-        case .geminiPro: "diamond"
+        switch providerID {
+        case "anthropic":
+            "brain"
+        case "openai":
+            "sparkles"
+        case "google":
+            "diamond"
+        default:
+            "cpu"
         }
     }
+}
+
+private struct GenerationSession: Identifiable {
+    let id = UUID()
+    let title: String
+    let stream: AsyncThrowingStream<LLMEvent, Error>
 }
 
 // MARK: - Plan Generation View
 
 struct PlanGenerationView: View {
     @State private var projectDescription = ""
-    @State private var selectedProvider: LLMProvider = .claudeOpus
+    @State private var providerRegistry = ProviderRegistry()
+    @State private var selectedModelID: GenerationModelOption.ID?
     @State private var showStructuredFields = false
-    @State private var isGenerating = false
+    @State private var isLoadingProviders = false
+    @State private var generationSession: GenerationSession?
+    @State private var providerLoadError: String?
 
     // Optional structured fields
     @State private var projectName = ""
     @State private var techStack = ""
     @State private var targetPlatform = ""
     @State private var repositoryURL = ""
-
-    // Provider availability (will be wired to KeychainService in later beads)
-    @State private var hasConfiguredProviders = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +79,23 @@ struct PlanGenerationView: View {
                 .padding(.vertical, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            await refreshProviders()
+        }
+        .sheet(item: $generationSession) { session in
+            NavigationStack {
+                StreamingResponseView(stream: session.stream)
+                    .navigationTitle(session.title)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                generationSession = nil
+                            }
+                        }
+                    }
+                    .frame(minWidth: 720, minHeight: 520)
+            }
+        }
     }
 
     // MARK: - Header
@@ -144,15 +174,26 @@ struct PlanGenerationView: View {
             Text("Model")
                 .font(.headline)
 
-            if hasConfiguredProviders {
-                Picker("Model", selection: $selectedProvider) {
-                    ForEach(LLMProvider.allCases) { provider in
-                        Label(provider.rawValue, systemImage: provider.icon)
-                            .tag(provider)
+            if isLoadingProviders {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Checking configured providers…")
+                        .foregroundStyle(.secondary)
+                }
+            } else if hasConfiguredProviders {
+                Picker("Model", selection: $selectedModelID) {
+                    ForEach(modelOptions) { option in
+                        Label(option.pickerLabel, systemImage: option.icon)
+                            .tag(Optional(option.id))
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(maxWidth: 240)
+                .frame(maxWidth: 280)
+
+                Text("\(modelOptions.count) configured model\(modelOptions.count == 1 ? "" : "s") available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 noProvidersPrompt
             }
@@ -160,15 +201,27 @@ struct PlanGenerationView: View {
     }
 
     private var noProvidersPrompt: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-            Text("No API keys configured.")
-                .foregroundStyle(.secondary)
-            Button("Open Settings") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text(providerLoadError ?? "No API keys configured.")
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.link)
+
+            HStack(spacing: 12) {
+                Button("Open Settings") {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                }
+                .buttonStyle(.link)
+
+                Button("Refresh Providers") {
+                    Task {
+                        await refreshProviders()
+                    }
+                }
+                .buttonStyle(.link)
+            }
         }
         .padding(12)
         .background(Color.orange.opacity(0.1))
@@ -179,10 +232,10 @@ struct PlanGenerationView: View {
 
     private var footer: some View {
         HStack {
-            if isGenerating {
+            if generationSession != nil {
                 ProgressView()
                     .controlSize(.small)
-                Text("Generating plan...")
+                Text("Generation session active")
                     .foregroundStyle(.secondary)
             }
 
@@ -193,7 +246,7 @@ struct PlanGenerationView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isGenerating || !hasConfiguredProviders)
+            .disabled(!canGenerate)
         }
     }
 
@@ -203,16 +256,123 @@ struct PlanGenerationView: View {
         projectDescription.split(whereSeparator: \.isWhitespace).count
     }
 
+    private var modelOptions: [GenerationModelOption] {
+        providerRegistry.allModels.map { option in
+            GenerationModelOption(
+                providerID: option.provider.id,
+                providerName: option.provider.displayName,
+                modelID: option.model.id,
+                modelDisplayName: option.model.displayName
+            )
+        }
+    }
+
+    private var hasConfiguredProviders: Bool {
+        !modelOptions.isEmpty
+    }
+
+    private var selectedModel: GenerationModelOption? {
+        modelOptions.first { $0.id == selectedModelID } ?? modelOptions.first
+    }
+
+    private var canGenerate: Bool {
+        !projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && generationSession == nil
+            && hasConfiguredProviders
+            && !isLoadingProviders
+    }
+
     // MARK: - Actions
 
     private func generatePlan() {
-        isGenerating = true
-        // Plan generation will be wired to LLM API client (br-2bf.21+) in a later bead.
-        // For now, this is a placeholder that will be connected when the streaming
-        // response renderer (br-2bf.25) and API clients (br-2bf.22/23/24) are ready.
-        Task {
-            try? await Task.sleep(for: .seconds(1))
-            isGenerating = false
+        guard let selectedModel,
+              let provider = providerRegistry.provider(for: selectedModel.providerID)
+        else {
+            return
+        }
+
+        let stream = provider.send(
+            prompt: buildPrompt(),
+            model: selectedModel.modelID,
+            system: PromptTemplates.planGenerationSystem,
+            stream: true
+        )
+
+        generationSession = GenerationSession(
+            title: selectedModel.modelDisplayName,
+            stream: stream
+        )
+    }
+
+    private func buildPrompt() -> String {
+        let description = if repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            projectDescription
+        } else {
+            "\(projectDescription)\n\nRepository URL: \(repositoryURL)"
+        }
+
+        return PromptTemplates.substitute(
+            template: PromptTemplates.planGenerationUser,
+            variables: [
+                "project_name": sanitized(projectName, fallback: "Untitled Project"),
+                "platform": sanitized(targetPlatform, fallback: "Unspecified"),
+                "tech_stack": sanitized(techStack, fallback: "Unspecified"),
+                "project_description": sanitized(description, fallback: "No description provided."),
+            ]
+        )
+    }
+
+    private func sanitized(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    @MainActor
+    private func refreshProviders() async {
+        isLoadingProviders = true
+        defer { isLoadingProviders = false }
+
+        providerLoadError = nil
+        let discoveredProviders = await discoverProviders()
+        providerRegistry.replaceProviders(with: discoveredProviders)
+
+        if let currentSelection = selectedModelID,
+           modelOptions.contains(where: { $0.id == currentSelection }) {
+            return
+        }
+        selectedModelID = modelOptions.first?.id
+    }
+
+    private func discoverProviders() async -> [any LLMProvider] {
+        let keychain = KeychainService()
+        var discovered: [any LLMProvider] = []
+
+        await loadProvider(into: &discovered, using: keychain, providerID: "anthropic") { apiKey in
+            ClaudeProvider(apiKey: apiKey)
+        }
+        await loadProvider(into: &discovered, using: keychain, providerID: "openai") { apiKey in
+            OpenAIProvider(apiKey: apiKey)
+        }
+        await loadProvider(into: &discovered, using: keychain, providerID: "google") { apiKey in
+            GeminiProvider(apiKey: apiKey)
+        }
+
+        return discovered
+    }
+
+    private func loadProvider(
+        into discovered: inout [any LLMProvider],
+        using keychain: KeychainService,
+        providerID: String,
+        factory: (String) -> any LLMProvider
+    ) async {
+        do {
+            let apiKey = try await keychain.retrieve(provider: providerID)
+            discovered.append(factory(apiKey))
+        } catch KeychainError.itemNotFound {
+            return
+        } catch {
+            providerLoadError = error.localizedDescription
         }
     }
 }

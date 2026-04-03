@@ -20,6 +20,11 @@
 		089C16BB293B2C5F00A1B2C3 /* PlanStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */; };
 		089C16BC293B2C5F00A1B2C3 /* PlanVersionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */; };
 		089C16BD293B2C5F00A1B2C3 /* PlanGenerationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AE293B2C5F00A1B2C3 /* PlanGenerationView.swift */; };
+		089C16BE293B2C5F00A1B2C3 /* DiffViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */; };
+		089C1730293B2C5F00A1B2C3 /* PlanDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */; };
+		089C1731293B2C5F00A1B2C3 /* PlanStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */; };
+		089C1732293B2C5F00A1B2C3 /* DiffEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */; };
+		089C1733293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +41,12 @@
 		089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStore.swift; sourceTree = "<group>"; };
 		089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanVersionManager.swift; sourceTree = "<group>"; };
 		089C16AE293B2C5F00A1B2C3 /* PlanGenerationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanGenerationView.swift; sourceTree = "<group>"; };
+		089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffViewer.swift; sourceTree = "<group>"; };
+		089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanDocumentTests.swift; sourceTree = "<group>"; };
+		089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStoreTests.swift; sourceTree = "<group>"; };
+		089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffEngineTests.swift; sourceTree = "<group>"; };
+		089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanVersionManagerTests.swift; sourceTree = "<group>"; };
+		089C1741293B2C5F00A1B2C3 /* HoopoeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HoopoeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +59,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		089C1743293B2C5F00A1B2C3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -55,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				089C1692293B2C5F00A1B2C3 /* Hoopoe */,
+				089C1744293B2C5F00A1B2C3 /* HoopoeTests */,
 				089C1693293B2C5F00A1B2C3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -71,6 +90,7 @@
 				089C16AC293B2C5F00A1B2C3 /* PlanStore.swift */,
 				089C16AD293B2C5F00A1B2C3 /* PlanVersionManager.swift */,
 				089C16AE293B2C5F00A1B2C3 /* PlanGenerationView.swift */,
+				089C16AF293B2C5F00A1B2C3 /* DiffViewer.swift */,
 				089C16A5293B2C5F00A1B2C3 /* Assets.xcassets */,
 				089C16A2293B2C5F00A1B2C3 /* Hoopoe.entitlements */,
 				089C16A7293B2C5F00A1B2C3 /* Preview Content */,
@@ -82,8 +102,20 @@
 			isa = PBXGroup;
 			children = (
 				089C16A3293B2C5F00A1B2C3 /* Hoopoe.app */,
+				089C1741293B2C5F00A1B2C3 /* HoopoeTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		089C1744293B2C5F00A1B2C3 /* HoopoeTests */ = {
+			isa = PBXGroup;
+			children = (
+				089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */,
+				089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */,
+				089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */,
+				089C1723293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift */,
+			);
+			path = HoopoeTests;
 			sourceTree = "<group>";
 		};
 		089C16A7293B2C5F00A1B2C3 /* Preview Content */ = {
@@ -118,7 +150,42 @@
 			productReference = 089C16A3293B2C5F00A1B2C3 /* Hoopoe.app */;
 			productType = "com.apple.product-type.application";
 		};
+		089C1740293B2C5F00A1B2C3 /* HoopoeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 089C1752293B2C5F00A1B2C3 /* Build configuration list for PBXNativeTarget "HoopoeTests" */;
+			buildPhases = (
+				089C1742293B2C5F00A1B2C3 /* Sources */,
+				089C1743293B2C5F00A1B2C3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				089C1745293B2C5F00A1B2C3 /* PBXTargetDependency */,
+			);
+			name = HoopoeTests;
+			productName = HoopoeTests;
+			productReference = 089C1741293B2C5F00A1B2C3 /* HoopoeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		089C1746293B2C5F00A1B2C3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 089C1690293B2C5F00A1B2C3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 089C16C0293B2C5F00A1B2C3;
+			remoteInfo = Hoopoe;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		089C1745293B2C5F00A1B2C3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 089C16C0293B2C5F00A1B2C3 /* Hoopoe */;
+			targetProxy = 089C1746293B2C5F00A1B2C3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		089C1690293B2C5F00A1B2C3 /* Project object */ = {
@@ -130,6 +197,10 @@
 				TargetAttributes = {
 					089C16C0293B2C5F00A1B2C3 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					089C1740293B2C5F00A1B2C3 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 089C16C0293B2C5F00A1B2C3;
 					};
 				};
 			};
@@ -151,6 +222,7 @@
 			projectRoot = "";
 			targets = (
 				089C16C0293B2C5F00A1B2C3 /* Hoopoe */,
+				089C1740293B2C5F00A1B2C3 /* HoopoeTests */,
 			);
 		};
 /* End PBXProject section */
@@ -181,6 +253,18 @@
 				089C16BB293B2C5F00A1B2C3 /* PlanStore.swift in Sources */,
 				089C16BC293B2C5F00A1B2C3 /* PlanVersionManager.swift in Sources */,
 				089C16BD293B2C5F00A1B2C3 /* PlanGenerationView.swift in Sources */,
+				089C16BE293B2C5F00A1B2C3 /* DiffViewer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		089C1742293B2C5F00A1B2C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				089C1730293B2C5F00A1B2C3 /* PlanDocumentTests.swift in Sources */,
+				089C1731293B2C5F00A1B2C3 /* PlanStoreTests.swift in Sources */,
+				089C1732293B2C5F00A1B2C3 /* DiffEngineTests.swift in Sources */,
+				089C1733293B2C5F00A1B2C3 /* PlanVersionManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -363,6 +447,42 @@
 			};
 			name = Release;
 		};
+		089C1750293B2C5F00A1B2C3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hoopoe.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hoopoe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hoopoe";
+			};
+			name = Debug;
+		};
+		089C1751293B2C5F00A1B2C3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hoopoe.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hoopoe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hoopoe";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -380,6 +500,15 @@
 			buildConfigurations = (
 				089C16F0293B2C5F00A1B2C3 /* Debug */,
 				089C16F1293B2C5F00A1B2C3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		089C1752293B2C5F00A1B2C3 /* Build configuration list for PBXNativeTarget "HoopoeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				089C1750293B2C5F00A1B2C3 /* Debug */,
+				089C1751293B2C5F00A1B2C3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

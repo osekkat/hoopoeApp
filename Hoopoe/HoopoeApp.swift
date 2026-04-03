@@ -35,4 +35,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 }
-
