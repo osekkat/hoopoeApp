@@ -35,12 +35,13 @@ final class ProviderURLTests: XCTestCase {
         // The version without leading slash is always correct
         XCTAssertTrue(withoutLeading.absoluteString.contains("anthropic.com/v1/messages"))
 
-        // The version with leading slash may or may not have double slash depending
-        // on Foundation version, but the without-leading version is always safe
-        XCTAssertEqual(
-            withoutLeading.path.filter({ $0 == "/" }).count,
-            withoutLeading.path.components(separatedBy: "/").count - 1,
-            "Path should not have consecutive slashes"
+        // Verify the safe version has no consecutive slashes in the path
+        // (excluding the "://" in the scheme)
+        let pathPortion = withoutLeading.absoluteString
+            .replacingOccurrences(of: "https://", with: "")
+        XCTAssertFalse(
+            pathPortion.contains("//"),
+            "Path should not have consecutive slashes: \(withoutLeading.absoluteString)"
         )
     }
 

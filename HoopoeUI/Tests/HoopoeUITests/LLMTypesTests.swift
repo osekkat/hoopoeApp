@@ -124,7 +124,7 @@ final class LLMTypesTests: XCTestCase {
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
 
-        var set: Set<LLMModel> = [a, b, c]
+        let set: Set<LLMModel> = [a, b, c]
         XCTAssertEqual(set.count, 2, "Set should deduplicate equal models")
     }
 }

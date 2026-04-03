@@ -37,9 +37,9 @@ final class MarkdownThemeTests: XCTestCase {
         let h0 = theme.headingFont(level: 0)
         XCTAssertEqual(h0, theme.headingFonts[0])
 
-        // Level 7+ should clamp to last font
+        // Level 7+ should clamp to last font (index 5)
         let h7 = theme.headingFont(level: 7)
-        XCTAssertEqual(h7, theme.headingFonts.last)
+        XCTAssertEqual(h7, theme.headingFonts[theme.headingFonts.count - 1])
 
         // Negative level should clamp to first
         let hNeg = theme.headingFont(level: -1)
@@ -60,7 +60,7 @@ final class MarkdownThemeTests: XCTestCase {
         XCTAssertEqual(c0, theme.headingColors[0])
 
         let c99 = theme.headingColor(level: 99)
-        XCTAssertEqual(c99, theme.headingColors.last)
+        XCTAssertEqual(c99, theme.headingColors[theme.headingColors.count - 1])
     }
 
     func testHeadingFontSizesAreDecreasing() {
