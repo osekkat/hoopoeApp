@@ -222,7 +222,7 @@ struct ContentView: View {
         case let .planEditor(planId):
             PlanEditorRouteView(planId: planId, router: router)
         case .planGeneration:
-            PlanGenerationPlaceholderView(router: router)
+            PlanGenerationView()
         case .planWizard:
             PlanWizardPlaceholderView(router: router)
         case let .multiModelSynthesis(planId):
