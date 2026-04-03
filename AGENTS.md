@@ -1,6 +1,6 @@
-# AGENTS.md — FrankenSQLite
+# AGENTS.md — Hoopoe
 
-> Guidelines for AI coding agents working in this Rust codebase.
+> Guidelines for AI coding agents working on this native macOS application (Swift + Rust).
 
 ---
 
@@ -28,91 +28,85 @@ If I tell you to do something, even if it goes against what follows below, YOU M
 
 ---
 
-## Git Branch: ONLY Use `main`, NEVER `master`
+## Toolchain: Swift + Rust
 
-**The default branch is `main`. The `master` branch exists only for legacy URL compatibility.**
+Hoopoe is a **Core/Shell** macOS application with two distinct technology stacks connected by a UniFFI bridge.
 
-- **All work happens on `main`** — commits, PRs, feature branches all merge to `main`
-- **Never reference `master` in code or docs** — if you see `master` anywhere, it's a bug that needs fixing
-- **The `master` branch must stay synchronized with `main`** — after pushing to `main`, also push to `master`:
-  ```bash
-  git push origin main:master
-  ```
+### Shell: Swift 6 (SwiftUI + AppKit)
 
-**If you see `master` referenced anywhere:**
+- **Language:** Swift 6 with strict concurrency
+- **UI Framework:** SwiftUI for data-entry and status-display views (sidebar, settings, kanban, config panels, cost dashboard); AppKit for high-performance rendering (plan editor, diff viewer, terminal emulation, swarm dashboard, dependency graph, session browser)
+- **AppKit↔SwiftUI bridging:** `NSViewRepresentable` (AppKit→SwiftUI) and `NSHostingView` (SwiftUI→AppKit)
+- **Package manager:** Swift Package Manager (SPM) + Xcode
+- **Concurrency model:** `@MainActor` for all UI state; `async/await` for bridge calls
 
-1. Update it to `main`
-2. Ensure `master` is synchronized: `git push origin main:master`
+### Core: Rust (stable)
 
----
-
-## Toolchain: Rust & Cargo
-
-We only use **Cargo** in this project, NEVER any other package manager.
-
-- **Edition:** Rust 2024 (nightly required — see `rust-toolchain.toml`)
-- **Workspace:** 27 crates under `crates/` (see members list in root `Cargo.toml`)
-- **Dependency versions:** Explicit versions for stability
-- **Configuration:** Cargo.toml workspace with `workspace = true` pattern
-- **Unsafe code:** Forbidden (`#![forbid(unsafe_code)]` via workspace lints)
+- **Async runtime:** Tokio — the Rust core uses `tokio` for all async operations (process management, WebSocket/JSON-RPC, file watching, SQLite access, coordination)
+- **Package manager:** Cargo workspace (`hoopoe-engine/`)
+- **Unsafe code:** Forbidden (`#![forbid(unsafe_code)]`) except in crates that require platform FFI (e.g., PTY management, libghostty bindings) — those crates override the workspace lint locally
 - **Clippy:** Pedantic + nursery lints denied at workspace level
 
-### Async Runtime: asupersync (MANDATORY — NO TOKIO)
+### Bridge: UniFFI + Swift Adapter Layer
 
-**This project uses [asupersync](/dp/asupersync) for async operations where needed. Tokio and the entire tokio ecosystem are FORBIDDEN.**
+- **Technology:** Mozilla UniFFI with UDL schema (`hoopoe-engine/src/hoopoe.udl`)
+- **Pattern:** Coarse-grained commands, async operations, snapshots, and event streams — never fine-grained interior references across the FFI boundary
+- **Swift adapter facade:** `HoopoeBridge/` wraps UniFFI-generated bindings in idiomatic Swift types
 
-- **Structured concurrency**: `Cx`, `Scope`, `region()` — no orphan tasks
-- **Cancel-correct channels**: Two-phase `reserve()/send()` — no data loss on cancellation
-- **Sync primitives**: `asupersync::sync::Mutex`, `RwLock`, `OnceCell`, `Pool` — cancel-aware
-- **Deterministic testing**: `LabRuntime` with virtual time, DPOR, oracles
+### CRITICAL: Architecture Boundary Rules
 
-**Forbidden crates**: `tokio`, `hyper`, `reqwest`, `axum`, `tower` (tokio adapter), `async-std`, `smol`, or any crate that transitively depends on tokio.
+These rules preserve the Core/Shell separation. Violating them creates architectural rot that is expensive to reverse.
 
-**Pattern**: All async functions take `&Cx` as first parameter. The `Cx` flows down from the consumer's runtime — FrankenSQLite does NOT create its own runtime.
+1. **SwiftUI/AppKit views bind only to Swift-native `@Observable` / `@MainActor` view models** — never to UniFFI-generated objects.
+2. **UniFFI-generated types are wrapped by `EngineFacade` and `EngineStore`** in `HoopoeBridge/`.
+3. **The FFI boundary is coarse-grained:** commands, async operations, snapshots, batched deltas, and event streams.
+4. **macOS-only capabilities are provided to Rust through foreign traits** implemented by the Swift host layer (`HoopoeHost/`).
+5. **The Rust engine owns all persistent state** (SQLite, session artifacts). The Swift shell queries snapshots — it does NOT maintain its own data authority.
+6. **All provider communication goes through `ProviderTrait`** in Rust — never through raw Python internals, CLI stdin hacking, or direct API calls from Swift.
 
-### Key Dependencies
+**YOU MUST NEVER:**
 
-| Crate                  | Purpose                                                     |
-| ---------------------- | ----------------------------------------------------------- |
-| `asupersync`           | Structured async runtime (channels, sync, regions, testing) |
-| `ftui`                 | TUI framework (crates.io: `ftui = "0.2.1"`)                 |
-| `thiserror`            | Derive macro for `Error` trait implementations              |
-| `serde` + `serde_json` | Serialization/deserialization                               |
-| `bitflags`             | Type-safe bitflag types for page flags, lock modes, etc.    |
-| `parking_lot`          | Fast mutex/rwlock for MVCC concurrency primitives           |
-| `tracing`              | Structured logging and diagnostics                          |
-| `smallvec`             | Stack-allocated small vectors for hot paths                 |
-| `memchr`               | SIMD-accelerated byte search                                |
-| `sha2`                 | SHA-256 checksums for page integrity                        |
-| `xxhash-rust`          | XXH3 fast hashing                                           |
-| `crc32c`               | CRC32C checksums                                            |
-| `blake3`               | BLAKE3 hashing                                              |
-| `crossbeam-epoch`      | Epoch-based memory reclamation                              |
-| `crossbeam-deque`      | Work-stealing deques                                        |
-| `chacha20poly1305`     | AEAD encryption for encrypted databases                     |
-| `argon2`               | Key derivation for database encryption                      |
-| `rand`                 | Random number generation                                    |
-| `nix`                  | POSIX filesystem operations                                 |
-| `rusqlite`             | C SQLite reference implementation (for conformance testing) |
-| `criterion`            | Benchmarking framework (dev)                                |
-| `proptest`             | Property-based testing (dev)                                |
-| `insta`                | Snapshot testing (dev)                                      |
-| `tempfile`             | Temporary file/directory creation for tests (dev)           |
+- Have Swift UI code directly import or reference UniFFI-generated types
+- Have the Swift shell write to the engine's SQLite database
+- Have the Swift shell spawn agent processes — that is the Rust engine's job
+- Bypass the `ProviderTrait` to talk to agent CLIs directly
+- Move persistent state authority from Rust to Swift
+
+### Key Dependencies (Rust)
+
+| Crate                  | Purpose                                              |
+| ---------------------- | ---------------------------------------------------- |
+| `tokio`                | Async runtime (process, network, timer, fs)          |
+| `serde` + `serde_json` | Serialization/deserialization                        |
+| `uniffi`               | FFI bridge to Swift                                  |
+| `rusqlite`             | SQLite persistence (engine-owned)                    |
+| `portable-pty`         | PTY management for agent processes                   |
+| `thiserror`            | Derive macro for `Error` trait implementations       |
+| `tracing`              | Structured logging and diagnostics                   |
+| `uuid`                 | Unique identifiers for agents, runs, beads, sessions |
+| `chrono`               | Date/time handling                                   |
+| `tokio-tungstenite`    | WebSocket for Claude CLI JSON-RPC protocol           |
+
+### Key Dependencies (Swift)
+
+| Package      | Purpose                                            |
+| ------------ | -------------------------------------------------- |
+| SourceEditor | NSTextView-based code editor                       |
+| TreeSitter   | Syntax highlighting and structural parsing         |
+| libghostty   | GPU-accelerated terminal rendering (Zig submodule) |
 
 ### Release Profile
 
-The release build optimizes for binary size:
-
 ```toml
 [profile.release]
-opt-level = "z"     # Optimize for size (lean binary for distribution)
+opt-level = "z"     # Optimize for size
 lto = true          # Link-time optimization
 codegen-units = 1   # Single codegen unit for better optimization
-panic = "abort"     # Smaller binary, no unwinding overhead
+panic = "abort"     # Smaller binary
 strip = true        # Remove debug symbols
 ```
 
-For throughput benchmarking and perf work, a separate profile exists:
+For throughput benchmarking and perf work:
 
 ```toml
 [profile.release-perf]
@@ -138,9 +132,9 @@ If you want to change something or add a feature, **revise existing code files i
 
 **NEVER** create variations like:
 
-- `mainV2.rs`
+- `AgentManagerV2.rs` or `PlanEditorV2.swift`
 - `main_improved.rs`
-- `main_enhanced.rs`
+- `main_enhanced.swift`
 
 New files are reserved for **genuinely new functionality** that makes zero sense to include in any existing file. The bar for creating new files is **incredibly high**.
 
@@ -148,7 +142,7 @@ New files are reserved for **genuinely new functionality** that makes zero sense
 
 ## Backwards Compatibility
 
-We do not care about backwards compatibility—we're in early development with no users. We want to do things the **RIGHT** way with **NO TECH DEBT**.
+We do not care about backwards compatibility — we're in early development with no users. We want to do things the **RIGHT** way with **NO TECH DEBT**.
 
 - Never create "compatibility shims"
 - Never create wrapper functions for deprecated APIs
@@ -158,10 +152,12 @@ We do not care about backwards compatibility—we're in early development with n
 
 ## Compiler Checks (CRITICAL)
 
-**After any substantive code changes, you MUST verify no errors were introduced:**
+**After any substantive code changes, you MUST verify no errors were introduced.**
+
+### Rust (hoopoe-engine)
 
 ```bash
-# Check for compiler errors and warnings (workspace-wide)
+# Check for compiler errors and warnings
 cargo check --workspace --all-targets
 
 # Check for clippy lints (pedantic + nursery are enabled)
@@ -169,6 +165,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 # Verify formatting
 cargo fmt --check
+```
+
+### Swift (Xcode/SPM)
+
+```bash
+# Build the full app
+xcodebuild build -scheme Hoopoe -destination 'platform=macOS'
+
+# Or via SPM for non-Xcode packages
+swift build
 ```
 
 If you see errors, **carefully understand and resolve each issue**. Read sufficient context to fix them the RIGHT way.
@@ -179,204 +185,243 @@ If you see errors, **carefully understand and resolve each issue**. Read suffici
 
 ### Testing Policy
 
-Every component crate includes inline `#[cfg(test)]` unit tests alongside the implementation. Tests must cover:
+Every component includes tests alongside the implementation. Tests must cover:
 
 - Happy path
 - Edge cases (empty input, max values, boundary conditions)
 - Error conditions
 
-Cross-component integration tests live in the workspace `tests/` directory.
-
-### Unit Tests
+### Rust Tests
 
 ```bash
-# Run all tests across the workspace
+# Run all Rust tests
 cargo test --workspace
 
 # Run with output
 cargo test --workspace -- --nocapture
 
-# Run tests for a specific crate
-cargo test -p fsqlite-types
-cargo test -p fsqlite-mvcc
-cargo test -p fsqlite-parser
-cargo test -p fsqlite-btree
-cargo test -p fsqlite-vdbe
-cargo test -p fsqlite-core
-cargo test -p fsqlite-e2e
+# Run tests for a specific crate/module
+cargo test -p hoopoe-engine
 
 # Run a specific test by name
 cargo test --workspace -- test_name_here
+```
 
-# Run tests with all features enabled
-cargo test --workspace --all-features
+### Swift Tests
+
+```bash
+# Run all tests via Xcode
+xcodebuild test -scheme Hoopoe -destination 'platform=macOS'
 ```
 
 ### Test Categories
 
-| Crate                   | Focus Areas                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `fsqlite-types`         | Type invariants, value conversions, serialization round-trips          |
-| `fsqlite-error`         | Error construction, display formatting, conversion                     |
-| `fsqlite-vfs`           | File I/O, locking, platform abstraction                                |
-| `fsqlite-pager`         | Page cache eviction, dirty tracking, buffer management                 |
-| `fsqlite-wal`           | WAL append/recovery, checkpoint, crash simulation                      |
-| `fsqlite-mvcc`          | Version chain creation/traversal, visibility rules, conflict detection |
-| `fsqlite-btree`         | Insert/delete/search, splits/merges, cursor navigation                 |
-| `fsqlite-ast`           | AST node construction, visitor traversal                               |
-| `fsqlite-parser`        | SQL parsing (SELECT, INSERT, UPDATE, DELETE, CREATE, etc.)             |
-| `fsqlite-planner`       | Plan generation, cost estimation, index selection                      |
-| `fsqlite-vdbe`          | Bytecode compilation, VM execution, opcode correctness                 |
-| `fsqlite-func`          | Built-in function correctness (math, string, date, etc.)               |
-| `fsqlite-ext-*`         | Extension-specific functionality                                       |
-| `fsqlite-core`          | Full-stack integration (SQL in, results out)                           |
-| `fsqlite`               | Public API contract tests                                              |
-| `fsqlite-cli`           | CLI argument parsing, REPL behavior                                    |
-| `fsqlite-harness`       | SQLite conformance test suite execution                                |
-| `fsqlite-e2e`           | End-to-end concurrent writer tests, fairness benchmarks                |
-| `fsqlite-observability` | Metrics collection, tracing integration                                |
-| `tests/` (workspace)    | Cross-component integration and end-to-end tests                       |
-| `benches/` (workspace)  | Criterion benchmarks                                                   |
-
-### Property-Based & Snapshot Tests
-
-- **proptest** is used for property-based testing (e.g., B-Tree invariants hold for arbitrary insert sequences)
-- **insta** is used for snapshot testing (e.g., parser output, query plans, bytecode dumps)
-
-### Test Fixtures
-
-Conformance test data lives in the `conformance/` directory. Fuzz testing targets are in the `fuzz/` directory.
+| Module                            | Focus Areas                                                          |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `hoopoe-engine/src/core/`         | Agent lifecycle, scheduling, leasing, run state machine, checkpoints |
+| `hoopoe-engine/src/providers/`    | Provider trait conformance, protocol parsing, event normalization    |
+| `hoopoe-engine/src/coordination/` | Agent Mail integration, beads management, file reservations          |
+| `hoopoe-engine/src/planning/`     | Plan AST compilation, linting, traceability, bead conversion         |
+| `hoopoe-engine/src/hardening/`    | Review orchestration, coverage analysis, de-slopification            |
+| `hoopoe-engine/src/learning/`     | Session indexing, memory management, ritual detection                |
+| `hoopoe-engine/src/persistence/`  | SQLite operations, event log, checkpoint storage                     |
+| `HoopoeBridge/`                   | EngineFacade commands, EventReducer correctness, ViewModel updates   |
+| `HoopoeHost/`                     | Keychain access, sandbox profiles, file dialog                       |
+| `HoopoeUI/`                       | View snapshot tests, SwiftUI preview conformance                     |
 
 ---
 
 ## Third-Party Library Usage
 
-If you aren't 100% sure how to use a third-party library, **SEARCH ONLINE** to find the latest documentation and current best practices.
+If you aren't 100% sure how to use a third-party library, **SEARCH ONLINE** to find the latest documentation and current best practices. This applies to both Rust crates and Swift packages.
 
 ---
 
-## FrankenSQLite — This Project
+## Hoopoe — This Project
 
-**This is the project you're working on.** FrankenSQLite is a clean-room Rust reimplementation of SQLite with MVCC page-level versioning for concurrent writers. It replaces SQLite's single-writer WAL_WRITE_LOCK with fine-grained page-level MVCC, allowing multiple transactions to write simultaneously without blocking each other.
+**This is the project you're working on.** Hoopoe is a native macOS application that implements the Agentic Coding Flywheel methodology in a polished, visual desktop experience. It orchestrates multiple AI coding agents (Claude Code, OpenAI Codex, and Gemini CLI) simultaneously, guiding users through the full lifecycle: **Plan → Beads → Swarm → Harden → Learn**.
 
-### Key Innovation
+### Core Innovation
 
-Traditional SQLite uses a single WAL_WRITE_LOCK that serializes all writers. FrankenSQLite replaces this with **page-level MVCC versioning**, where each page carries a version chain. Writers only conflict when they touch the same page in the same transaction window, dramatically improving write concurrency for real-world workloads.
-
-### CRITICAL: Concurrent-Writer Mode is the ENTIRE POINT — DO NOT TOUCH
-
-> **This is the single most important rule in this project. Violating it destroys the project's reason for existing.**
-
-FrankenSQLite exists for ONE reason: to eliminate SQLite's single-writer serialization bottleneck via MVCC page-level versioning. **Concurrent-writer mode is ON by default and MUST stay ON by default.** Every `BEGIN` is promoted to `BEGIN CONCURRENT` unless the user explicitly opts out.
-
-**YOU MUST NEVER:**
-
-1. **Set `concurrent_mode_default` to `false`** — This is the field in `Connection` (connection.rs) that controls whether `BEGIN` promotes to `BEGIN CONCURRENT`. It MUST be `true`. Setting it to `false` reverts the entire system to behaving like stock SQLite with a single-writer bottleneck.
-
-2. **Implement SQLite-style serialized file locking** — FrankenSQLite does NOT use SQLite's Shared/Reserved/Pending/Exclusive lock escalation protocol for write serialization. That is the exact bottleneck we exist to replace. The `MemoryVfs` locking stubs are intentionally minimal because MVCC handles concurrency at the page level, not the file-lock level.
-
-3. **Default any concurrency setting to OFF/false/disabled** — Every harness, executor, config struct, and benchmark setting that has a `concurrent_mode` field MUST default to `true`. Check: `HarnessSettings`, `FsqliteExecConfig`, `benchmark_settings()`, and `Connection` internals.
-
-4. **Add lock contention that blocks concurrent writers** — If you find yourself writing code where one writer blocks another at the file/connection level, you are reimplementing the bottleneck. Writers in FrankenSQLite only conflict at the PAGE level within the same transaction window — that's MVCC.
-
-**The key locations you must never regress:**
-
-- `crates/fsqlite-core/src/connection.rs` — `concurrent_mode_default: RefCell::new(true)`
-- `crates/fsqlite-e2e/src/lib.rs` — `HarnessSettings::default()` → `concurrent_mode: true`
-- `crates/fsqlite-e2e/src/fsqlite_executor.rs` — `FsqliteExecConfig::default()` → `concurrent_mode: true`
-- `crates/fsqlite-e2e/src/fairness.rs` — `benchmark_settings()` → `concurrent_mode: true`
-
-**Why this rule exists:** On Feb 10 2026, an agent set `concurrent_mode_default` to `false` and implemented serialized file locking in `MemoryVfs`, completely defeating the project's core innovation. It took an emergency session to identify and revert the damage. This must never happen again. If you are unsure whether a change affects concurrency behavior, ASK before making it.
+Hoopoe democratizes the Flywheel methodology — which proves that 85% of value comes from exhaustive planning and bead polishing — by encoding the workflow into a purpose-built application. It replaces the terminal-and-VPS-centric workflow with a structured GUI while preserving full power-user escape hatches.
 
 ### Architecture
 
 ```
-SQL Text --> Parser --> AST --> Planner --> VDBE Bytecode --> Execution
-                                                              |
-Storage: VFS --> Pager --> WAL --> MVCC --> B-Tree --> Page I/O
+Hoopoe.app
+├── hoopoe-engine/          # Rust core (Tokio): agent orchestration, providers,
+│                           #   coordination, planning, persistence, learning
+├── HoopoeBridge/           # Swift adapter layer over UniFFI-generated bindings
+│                           #   EngineFacade, EngineStore, EventReducer, ViewModels
+├── HoopoeHost/             # macOS-only services (Keychain, Seatbelt, file dialogs)
+├── HoopoeUI/               # Hybrid SwiftUI + AppKit shell
+│   ├── MainWindow/         #   Sidebar, ContentArea, InspectorPanel, NextActionPanel
+│   ├── Planning/           #   Multi-model synthesis, refinement tracking
+│   ├── Beads/              #   Kanban board, dependency graph, polishing
+│   ├── Swarm/              #   Agent cards, mailbox, approvals, cost dashboard
+│   ├── Hardening/          #   Test runner, quality gates
+│   ├── Learning/           #   Skill editor, insights, session search
+│   ├── Settings/           #   Provider config, agent config, project config
+│   └── AppKitViews/        #   PlanEditor, DiffViewer, GhosttyTerminal, BeadGraph,
+│                           #     TimelineView, SessionBrowser, ReviewPanel
+└── HoopoeUtils/            # Shared Swift utilities (markdown, git, diagnostics)
 ```
 
-**Frontend pipeline:** SQL text is tokenized and parsed into an AST, then the planner generates a query plan that is compiled into VDBE (Virtual Database Engine) bytecode for execution.
-
-**Storage pipeline:** The VFS (Virtual File System) abstracts platform I/O. The Pager manages fixed-size pages in a cache. The WAL (Write-Ahead Log) provides crash recovery. MVCC manages page version chains for concurrent access. The B-Tree layer organizes rows and indexes on pages.
-
-### Workspace Structure
+### Rust Engine Internals
 
 ```
-frankensqlite/
-├── Cargo.toml                         # Workspace root — all 27 members, shared deps, profiles
-├── rust-toolchain.toml                # Nightly toolchain requirement
-├── crates/
-│   ├── fsqlite-types/                 # Foundation types (Value, PageNumber, RowId, etc.)
-│   ├── fsqlite-error/                 # Unified error types and result aliases
-│   ├── fsqlite-vfs/                   # Virtual File System — platform-agnostic I/O
-│   ├── fsqlite-pager/                 # Page cache and buffer pool management
-│   ├── fsqlite-wal/                   # Write-Ahead Log for crash recovery
-│   ├── fsqlite-mvcc/                  # MVCC — page version chains (core innovation)
-│   ├── fsqlite-btree/                 # B-Tree and B+Tree for tables and indexes
-│   ├── fsqlite-ast/                   # Abstract Syntax Tree node definitions
-│   ├── fsqlite-parser/                # SQL tokenizer and parser (SQL text to AST)
-│   ├── fsqlite-planner/               # Query planner and optimizer (AST to plan)
-│   ├── fsqlite-vdbe/                  # Virtual Database Engine — bytecode compiler and VM
-│   ├── fsqlite-func/                  # Built-in scalar, aggregate, and window functions
-│   ├── fsqlite-ext-fts3/              # Extension: Full-Text Search v3
-│   ├── fsqlite-ext-fts5/              # Extension: Full-Text Search v5
-│   ├── fsqlite-ext-rtree/             # Extension: R-Tree spatial indexing
-│   ├── fsqlite-ext-json/              # Extension: JSON1 functions
-│   ├── fsqlite-ext-session/           # Extension: Session/changeset tracking
-│   ├── fsqlite-ext-icu/               # Extension: ICU Unicode collation
-│   ├── fsqlite-ext-misc/              # Extension: Miscellaneous loadable extensions
-│   ├── fsqlite-core/                  # Core engine — ties all layers together
-│   ├── fsqlite/                       # Public API crate — user-facing library interface
-│   ├── fsqlite-cli/                   # Command-line shell (like sqlite3 CLI)
-│   ├── fsqlite-harness/               # Test harness and conformance testing framework
-│   ├── fsqlite-e2e/                   # End-to-end tests, concurrent writer harness
-│   └── fsqlite-observability/         # Metrics collection and tracing integration
-├── src/                               # Additional source files and utilities
-├── tests/                             # Integration and end-to-end tests
-├── benches/                           # Criterion benchmarks
-├── fuzz/                              # Fuzz testing targets
-└── conformance/                       # SQLite conformance test data
+hoopoe-engine/
+├── src/core/               # Agent orchestration engine
+│   ├── agent_manager.rs    # Agent lifecycle, task supervision
+│   ├── agent_process.rs    # tokio::process wrapper for agent CLIs + PTY
+│   ├── scheduler.rs        # Dependency-aware work scheduling
+│   ├── run_manager.rs      # Run state machine (queued→leased→running→review→merged|failed)
+│   ├── lease_manager.rs    # Run leases with TTLs and heartbeats
+│   ├── dead_letter.rs      # Failed runs requiring human action
+│   ├── agent_router.rs     # Capability-aware provider selection
+│   ├── rate_limit.rs       # Rate limit detection, account rotation
+│   ├── budget_tracker.rs   # Token usage and cost tracking
+│   ├── policy_engine.rs    # Tiered safety: Allowed/Blocked/ApprovalRequired
+│   └── checkpoint.rs       # Swarm checkpoint: snapshot & restore full engine state
+│
+├── src/providers/          # Multi-provider abstraction
+│   ├── mod.rs              # Common ProviderTrait + ProviderEvent
+│   ├── claude/             # Claude Agent SDK (Python subprocess) → claude CLI
+│   │   ├── protocol.rs     # WebSocket/JSON-RPC control protocol
+│   │   ├── types.rs        # Message types, options, hooks
+│   │   └── sdk_adapter.rs  # Rust adapter wrapping Claude Agent SDK
+│   ├── codex.rs            # Codex app-server JSON-RPC client
+│   ├── gemini.rs           # Gemini CLI subprocess + stream-json parsing
+│   └── detector.rs         # Auto-detects installed CLIs
+│
+├── src/coordination/       # Flywheel coordination stack
+│   ├── agent_mail.rs       # MCP Agent Mail integration
+│   ├── beads_manager.rs    # br (beads_rust) integration
+│   ├── beads_viewer.rs     # bv (beads_viewer) graph analysis
+│   ├── file_reservation.rs # Advisory file locking
+│   └── agentsmd_gen.rs     # Auto-generates AGENTS.md for spawned agents
+│
+├── src/planning/           # Plan creation & management
+│   ├── plan_document.rs    # Markdown source + compiled Plan AST
+│   ├── plan_schema.rs      # Typed sections with stable section IDs
+│   ├── plan_linter.rs      # Structural + semantic validation
+│   ├── traceability.rs     # Persistent section↔bead links
+│   ├── multi_model.rs      # Multi-model plan refinement
+│   ├── plan_to_beads.rs    # Plan → beads conversion
+│   └── bead_polisher.rs    # Iterative bead refinement
+│
+├── src/hardening/          # Review, testing, quality
+│   ├── review_orchestrator.rs # Cross-agent review workflows
+│   ├── test_coverage.rs    # Coverage analysis
+│   ├── ubs_integration.rs  # Ultimate Bug Scanner bridge
+│   ├── de_slopifier.rs     # AI writing pattern detection
+│   └── fresh_eyes.rs       # Fresh-session review automation
+│
+├── src/learning/           # CASS Memory & skill refinement
+│   ├── session_indexer.rs  # CASS-compatible session indexing
+│   ├── memory_manager.rs   # Three-layer memory architecture
+│   ├── ritual_detector.rs  # Discovers repeated patterns
+│   └── skill_refiner.rs    # Meta-skill refinement pipeline
+│
+├── src/persistence/        # Engine-owned storage
+│   ├── session_store.rs    # Persistent session state (SQLite)
+│   ├── approval_store.rs   # Durable approval records (SQLite)
+│   ├── checkpoint_store.rs # Swarm checkpoint snapshots (SQLite)
+│   ├── event_log.rs        # Append-only engine event log (rotated JSONL)
+│   ├── schema.rs           # Database schema and migrations
+│   └── jsonl.rs            # JSONL session artifact parsing
+│
+├── src/host_traits/        # Interfaces implemented by Swift host
+│   ├── keychain.rs         # KeychainHost trait
+│   ├── sandbox.rs          # SandboxHost trait
+│   ├── file_dialog.rs      # FileDialogHost trait
+│   ├── workspace.rs        # WorkspaceHost trait
+│   └── notification.rs     # NotificationHost trait
+│
+├── src/ffi.rs              # UniFFI export surface
+├── src/lib.rs              # Crate root
+├── src/hoopoe.udl          # UniFFI definition language schema
+├── Cargo.toml
+└── build.rs
 ```
 
-### Key Files by Crate
+### Data Flow
 
-| Crate                   | Key Files                 | Purpose                                                            |
-| ----------------------- | ------------------------- | ------------------------------------------------------------------ |
-| `fsqlite-types`         | `src/lib.rs`              | Foundation types: `Value`, `PageNumber`, `RowId`, column types     |
-| `fsqlite-error`         | `src/lib.rs`              | `FsqliteError` enum, `Result` alias, error conversions             |
-| `fsqlite-vfs`           | `src/lib.rs`              | `Vfs` trait, `MemoryVfs`, platform I/O abstraction                 |
-| `fsqlite-pager`         | `src/lib.rs`              | Page cache, buffer pool, dirty page tracking                       |
-| `fsqlite-wal`           | `src/lib.rs`              | WAL append/recovery, checkpoint logic                              |
-| `fsqlite-mvcc`          | `src/lib.rs`              | Page version chains, visibility rules, conflict detection          |
-| `fsqlite-btree`         | `src/lib.rs`              | B-Tree insert/delete/search, splits/merges, cursors                |
-| `fsqlite-ast`           | `src/lib.rs`              | AST node definitions for all SQL statement types                   |
-| `fsqlite-parser`        | `src/lib.rs`              | SQL tokenizer and recursive descent parser                         |
-| `fsqlite-planner`       | `src/lib.rs`              | Query plan generation, cost estimation, index selection            |
-| `fsqlite-vdbe`          | `src/lib.rs`              | Bytecode compiler, VM executor, opcode dispatch                    |
-| `fsqlite-func`          | `src/lib.rs`              | Built-in functions (math, string, date, aggregate, window)         |
-| `fsqlite-core`          | `src/connection.rs`       | `Connection` struct — integration layer, `concurrent_mode_default` |
-| `fsqlite`               | `src/lib.rs`              | Public API facade — what external users depend on                  |
-| `fsqlite-cli`           | `src/main.rs`             | Interactive shell binary (like `sqlite3`)                          |
-| `fsqlite-harness`       | `src/lib.rs`              | SQLite conformance test suite runner                               |
-| `fsqlite-e2e`           | `src/lib.rs`              | `HarnessSettings`, concurrent writer test framework                |
-| `fsqlite-e2e`           | `src/fsqlite_executor.rs` | `FsqliteExecConfig` with `concurrent_mode` default                 |
-| `fsqlite-e2e`           | `src/fairness.rs`         | Fairness benchmarks, `benchmark_settings()`                        |
-| `fsqlite-observability` | `src/lib.rs`              | Metrics collection, structured tracing integration                 |
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    Hoopoe UI  (Swift Shell)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │ Planning  │  │  Beads   │  │  Swarm   │  │ Harden   │        │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘        │
+│       └──────────────┴──────────────┴──────────────┘              │
+│                              │                                    │
+│               @MainActor ViewModels + EngineStore                │
+└──────────────────────────────┼───────────────────────────────────┘
+                               │  UniFFI (commands, snapshots,
+                               │  event streams, host trait calls)
+┌──────────────────────────────┼───────────────────────────────────┐
+│                    hoopoe-engine  (Rust Core, Tokio)              │
+│  ┌─────────────────┐  ┌────────────────┐  ┌─────────────────┐   │
+│  │  AgentManager    │  │ SessionStore   │  │  BudgetTracker  │   │
+│  └────────┬─────────┘  └───────┬────────┘  └────────┬────────┘  │
+│           │                    │                     │            │
+│  ┌────────▼─────────────────────────────────────────────────┐    │
+│  │              Providers (Rust adapters)                     │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │    │
+│  │  │ Claude       │  │ Codex        │  │ Gemini       │    │    │
+│  │  │ (Agent SDK   │  │ app-server   │  │ CLI          │    │    │
+│  │  │  via Python) │  │ (JSON-RPC)   │  │ (subprocess) │    │    │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘    │    │
+│  └─────────┼─────────────────┼─────────────────┼────────────┘    │
+│            │                 │                 │                  │
+│  ┌─────────▼─────────────────▼─────────────────▼────────────┐    │
+│  │              Coordination Layer                            │    │
+│  │  ┌──────────────┐  ┌──────────┐  ┌──────────┐  ┌──────┐ │    │
+│  │  │  Agent Mail   │  │  Beads   │  │    bv    │  │ Git  │ │    │
+│  │  │  (MCP + DB)   │  │  (br)    │  │  (graph) │  │      │ │    │
+│  │  └──────────────┘  └──────────┘  └──────────┘  └──────┘ │    │
+│  └──────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ### Key Design Decisions
 
-- **MVCC page-level versioning** replaces SQLite's single WAL_WRITE_LOCK — concurrent writers only conflict when touching the same page
-- **`BEGIN` auto-promotes to `BEGIN CONCURRENT`** by default — concurrent mode is always on unless explicitly opted out
-- **Clean-room implementation** — no C SQLite code, pure Rust
-- **VDBE bytecode VM** — same execution model as SQLite for compatibility
-- **Crash recovery via WAL** — write-ahead logging with checkpoint support
-- **Extension system** — FTS3, FTS5, R-Tree, JSON1, Session, ICU, misc (matching SQLite's extension surface)
-- **Conformance testing against C SQLite** — `rusqlite` is a dev dependency for reference comparison
-- **Property-based testing** — proptest for invariant verification on B-Trees, MVCC chains, parser
-- **Snapshot testing** — insta for parser output, query plans, bytecode dumps
-- **`#![forbid(unsafe_code)]`** at workspace level — `unsafe` is only in `fsqlite-vfs` (mmap/shm) and `fsqlite-c-api` (FFI); those crates override the workspace lint locally
+- **Core/Shell split** — Rust owns orchestration, persistence, and protocol logic; Swift owns UI, macOS integration, and user interaction
+- **UniFFI bridge** — Type-safe FFI with async support; coarse-grained boundary (commands + snapshots + events)
+- **Tokio async runtime** — All Rust async I/O (process, network, storage) is non-blocking on Tokio
+- **Agent process model** — Each agent runs in a Rust-owned PTY with optional tmux persistence for crash recovery
+- **Multiple provider support** — Claude (Agent SDK via Python subprocess), Codex (app-server JSON-RPC), Gemini (CLI subprocess) — all behind a common `ProviderTrait`
+- **Swarm checkpoints** — Complete snapshots of engine state (agents, runs, beads, git, budget, approvals) stored in SQLite for crash recovery
+- **Host traits** — macOS capabilities (Keychain, Seatbelt, file dialogs, notifications) provided to Rust via UniFFI foreign traits
+- **Ghostty terminal** — GPU-accelerated terminal rendering via libghostty C API, cached per agent for instant switching
 - **Structured tracing** throughout — every layer emits spans for diagnostics
+
+### Flywheel Phases
+
+| Phase      | Engine Components                                    | UI Components                                                   |
+| ---------- | ---------------------------------------------------- | --------------------------------------------------------------- |
+| **Plan**   | plan_document, plan_schema, plan_linter, multi_model | PlanEditorView, ModelPanel, RefinementTracker                   |
+| **Beads**  | plan_to_beads, bead_polisher, traceability           | BeadBoard, BeadGraph, BeadDetail, PolishProgress                |
+| **Swarm**  | agent_manager, scheduler, run_manager, lease_manager | AgentCard, MailboxView, CostDashboard, GhosttyTerminal          |
+| **Harden** | review_orchestrator, test_coverage, de_slopifier     | TestRunner, QualityGates, ReviewPanel, DiffViewer               |
+| **Learn**  | session_indexer, memory_manager, ritual_detector     | SkillEditor, InsightsView, SessionBrowser, SessionSearchOverlay |
+
+### Provider Integration
+
+| Provider        | Integration Mode                                  | Protocol                           | Key Capabilities                                                           |
+| --------------- | ------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------- |
+| **Claude Code** | Agent SDK (Python) via Rust adapter               | WebSocket + bidirectional JSON-RPC | Custom tools via MCP, hooks, file checkpointing, structured output, budget |
+| **Codex**       | `codex app-server` subprocess                     | JSON-RPC over stdin/stdout         | Seatbelt sandboxing, subagents, approval workflows, session resume         |
+| **Gemini**      | CLI subprocess with `--output-format stream-json` | Streaming JSON over stdout         | Google Search grounding, 1M token context, checkpointing                   |
+
+### Smart Agent Routing
+
+Hoopoe uses bv's graph metrics (PageRank, betweenness centrality) combined with bead `requiredCapabilities` to route beads to the optimal agent type:
+
+- **High-PageRank foundation beads** → Claude (best for architectural reasoning)
+- **Leaf beads with test obligations** → Codex (fast iteration, built-in testing)
+- **Documentation beads** → Gemini (strong at docs, has Google Search grounding)
+- **Review beads** → Claude or Codex in review-only mode
 
 ---
 
@@ -586,23 +631,23 @@ bv --robot-insights | jq '.Cycles'                         # Circular deps (must
 ### Commands
 
 ```bash
-ubs file.rs file2.rs                    # Specific files (< 1s) — USE THIS
+ubs file.rs file2.swift                 # Specific files (< 1s) — USE THIS
 ubs $(git diff --name-only --cached)    # Staged files — before commit
-ubs --only=rust,toml src/               # Language filter (3-5x faster)
+ubs --only=rust,swift src/              # Language filter (3-5x faster)
 ubs --ci --fail-on-warning .            # CI mode — before PR
-ubs .                                   # Whole project (ignores target/, Cargo.lock)
+ubs .                                   # Whole project (ignores build artifacts)
 ```
 
 ### Output Format
 
 ```
-⚠️  Category (N errors)
+Warning  Category (N errors)
     file.rs:42:5 – Issue description
-    💡 Suggested fix
+    Hint: Suggested fix
 Exit code: 1
 ```
 
-Parse: `file:line:col` → location | 💡 → how to fix | Exit 0/1 → pass/fail
+Parse: `file:line:col` → location | Hint → how to fix | Exit 0/1 → pass/fail
 
 ### Fix Workflow
 
@@ -615,38 +660,9 @@ Parse: `file:line:col` → location | 💡 → how to fix | Exit 0/1 → pass/fa
 
 ### Bug Severity
 
-- **Critical (always fix):** Memory safety, use-after-free, data races, SQL injection
-- **Important (production):** Unwrap panics, resource leaks, overflow checks
-- **Contextual (judgment):** TODO/FIXME, println! debugging
-
----
-
-## RCH — Remote Compilation Helper
-
-RCH offloads `cargo build`, `cargo test`, `cargo clippy`, and other compilation commands to a fleet of 8 remote Contabo VPS workers instead of building locally. This prevents compilation storms from overwhelming csd when many agents run simultaneously.
-
-**RCH is installed at `~/.local/bin/rch` and is hooked into Claude Code's PreToolUse automatically.** Most of the time you don't need to do anything if you are Claude Code — builds are intercepted and offloaded transparently.
-
-To manually offload a build:
-
-```bash
-rch exec -- cargo build --release
-rch exec -- cargo test
-rch exec -- cargo clippy
-```
-
-Quick commands:
-
-```bash
-rch doctor                    # Health check
-rch workers probe --all       # Test connectivity to all 8 workers
-rch status                    # Overview of current state
-rch queue                     # See active/waiting builds
-```
-
-If rch or its workers are unavailable, it fails open — builds run locally as normal.
-
-**Note for Codex/GPT-5.2:** Codex does not have the automatic PreToolUse hook, but you can (and should) still manually offload compute-intensive compilation commands using `rch exec -- <command>`. This avoids local resource contention when multiple agents are building simultaneously.
+- **Critical (always fix):** Memory safety, use-after-free, data races, injection vulnerabilities
+- **Important (production):** Force-unwrap panics, resource leaks, overflow checks
+- **Contextual (judgment):** TODO/FIXME, print debugging
 
 ---
 
@@ -669,17 +685,18 @@ If rch or its workers are unavailable, it fails open — builds run locally as n
 - Need raw speed or **hunting text** → `rg`
 - Often combine: `rg` to shortlist files, then `ast-grep` to match/modify
 
-### Rust Examples
+### Examples
 
 ```bash
-# Find structured code (ignores comments)
-ast-grep run -l Rust -p 'fn $NAME($$$ARGS) -> $RET { $$$BODY }'
+# Rust: Find all unwrap() calls in the engine
+ast-grep run -l Rust -p '$EXPR.unwrap()' hoopoe-engine/
 
-# Find all unwrap() calls
-ast-grep run -l Rust -p '$EXPR.unwrap()'
+# Swift: Find all @MainActor classes
+ast-grep run -l Swift -p '@MainActor class $NAME { $$$BODY }'
 
 # Quick textual hunt
-rg -n 'println!' -t rust
+rg -n 'ProviderTrait' -t rust
+rg -n '@Observable' -t swift
 
 # Combine speed + precision
 rg -l -t rust 'unwrap\(' | xargs ast-grep run -l Rust -p '$X.unwrap()' --json
@@ -697,20 +714,20 @@ rg -l -t rust 'unwrap\(' | xargs ast-grep run -l Rust -p '$X.unwrap()' --json
 
 ### When to Use What
 
-| Scenario                                   | Tool        | Why                                    |
-| ------------------------------------------ | ----------- | -------------------------------------- |
-| "How does the MVCC version chain work?"    | `warp_grep` | Exploratory; don't know where to start |
-| "Where is conflict detection implemented?" | `warp_grep` | Need to understand architecture        |
-| "Find all uses of `PageNumber`"            | `ripgrep`   | Targeted literal search                |
-| "Find files with `println!`"               | `ripgrep`   | Simple pattern                         |
-| "Replace all `unwrap()` with `expect()`"   | `ast-grep`  | Structural refactor                    |
+| Scenario                                  | Tool        | Why                                    |
+| ----------------------------------------- | ----------- | -------------------------------------- |
+| "How does the agent scheduling work?"     | `warp_grep` | Exploratory; don't know where to start |
+| "How does the UniFFI bridge pass events?" | `warp_grep` | Need to understand architecture        |
+| "Find all uses of `ProviderTrait`"        | `ripgrep`   | Targeted literal search                |
+| "Find files with `println!`"              | `ripgrep`   | Simple pattern                         |
+| "Replace all `unwrap()` with `expect()`"  | `ast-grep`  | Structural refactor                    |
 
 ### warp_grep Usage
 
 ```
 mcp__morph-mcp__warp_grep(
-  repoPath: "/dp/frankensqlite",
-  query: "How does the page-level MVCC versioning work?"
+  repoPath: "/Users/osekkat/hoopoeApp",
+  query: "How does the swarm checkpoint system work?"
 )
 ```
 
@@ -811,7 +828,7 @@ git push                # Push to remote
 
 ```bash
 cass health
-cass search "async runtime" --robot --limit 5
+cass search "agent scheduling" --robot --limit 5
 cass view /path/to/session.jsonl -n 42 --json
 cass expand /path/to/session.jsonl -n 42 -C 3 --json
 cass capabilities --json
@@ -837,13 +854,7 @@ You constantly bother me and stop working with concerned questions that look sim
 ```
 Unexpected changes (need guidance)
 
-- Working tree still shows edits I did not make in Cargo.toml, Cargo.lock, src/cli/commands/upgrade.rs, src/storage/sqlite.rs, tests/conformance.rs, tests/storage_deps.rs. Please advise whether to keep/commit/revert these before any further work. I did not touch them.
-
-Next steps (pick one)
-
-1. Decide how to handle the unrelated modified files above so we can resume cleanly.
-2. Triage beads_rust-orko (clippy/cargo warnings) and beads_rust-ydqr (rustfmt failures).
-3. If you want a full suite run later, fix conformance/clippy blockers and re-run cargo test --all.
+- Working tree still shows edits I did not make in various files. Please advise whether to keep/commit/revert these before any further work. I did not touch them.
 ```
 
 NEVER EVER DO THAT AGAIN. The answer is literally ALWAYS the same: those are changes created by the potentially dozen of other agents working on the project at the same time. This is not only a common occurrence, it happens multiple times PER MINUTE. The way to deal with it is simple: you NEVER, under ANY CIRCUMSTANCE, stash, revert, overwrite, or otherwise disturb in ANY way the work of other agents. Just treat those changes identically to changes that you yourself made. Just fool yourself into thinking YOU made the changes and simply don't recall it for some reason.
