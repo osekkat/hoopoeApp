@@ -180,5 +180,39 @@ final class MarkdownHighlighterTests: XCTestCase {
         XCTAssertEqual(result.string, text)
         XCTAssertEqual(result.length, text.utf16.count)
     }
+
+    // MARK: - Theme Application
+
+    func testHighlightUsesThemeEmphasisAndStrongColors() {
+        let theme = MarkdownTheme.light.adapted(fontSize: 16, usesMonospacedFont: false)
+        let highlighter = MarkdownHighlighter(theme: theme)
+        let text = "*italic* and **bold**"
+
+        let result = highlighter.highlight(text)
+        let nsText = text as NSString
+        let italicRange = nsText.range(of: "italic")
+        let boldRange = nsText.range(of: "bold")
+        let italicColor = result.attribute(.foregroundColor, at: italicRange.location, effectiveRange: nil) as? NSColor
+        let boldColor = result.attribute(.foregroundColor, at: boldRange.location, effectiveRange: nil) as? NSColor
+        let italicFont = result.attribute(.font, at: italicRange.location, effectiveRange: nil) as? NSFont
+        let boldFont = result.attribute(.font, at: boldRange.location, effectiveRange: nil) as? NSFont
+
+        XCTAssertTrue(italicColor?.isEqual(theme.emphasisColor) ?? false)
+        XCTAssertTrue(boldColor?.isEqual(theme.strongColor) ?? false)
+        XCTAssertNotNil(italicFont)
+        XCTAssertNotNil(boldFont)
+        XCTAssertEqual(italicFont?.pointSize ?? 0, theme.bodyFont.pointSize, accuracy: 0.01)
+        XCTAssertEqual(boldFont?.pointSize ?? 0, theme.bodyFont.pointSize, accuracy: 0.01)
+    }
+
+    // MARK: - Editor Integration Helpers
+
+    func testHeadingLineRangeHandlesCRLFLineEndings() {
+        let text = "# Intro\r\n\r\n## Goals\r\nBody\r\n## Architecture\r\nMore"
+        let range = PlanEditorView.headingLineRange(matching: "Architecture", in: text)
+
+        XCTAssertNotNil(range)
+        XCTAssertEqual((text as NSString).substring(with: range!), "## Architecture")
+    }
 }
 #endif

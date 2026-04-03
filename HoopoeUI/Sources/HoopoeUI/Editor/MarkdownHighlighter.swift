@@ -122,18 +122,16 @@ public final class MarkdownHighlighter {
             ], range: safeRange)
 
         case "emphasis":
-            attributed.addAttribute(
-                .font,
-                value: NSFontManager.shared.convert(theme.bodyFont, toHaveTrait: .italicFontMask),
-                range: safeRange
-            )
+            attributed.addAttributes([
+                .font: NSFontManager.shared.convert(theme.bodyFont, toHaveTrait: .italicFontMask),
+                .foregroundColor: theme.emphasisColor,
+            ], range: safeRange)
 
         case "strong_emphasis":
-            attributed.addAttribute(
-                .font,
-                value: NSFontManager.shared.convert(theme.bodyFont, toHaveTrait: .boldFontMask),
-                range: safeRange
-            )
+            attributed.addAttributes([
+                .font: NSFontManager.shared.convert(theme.bodyFont, toHaveTrait: .boldFontMask),
+                .foregroundColor: theme.strongColor,
+            ], range: safeRange)
 
         case "link", "uri_autolink":
             attributed.addAttribute(.foregroundColor, value: theme.linkColor, range: safeRange)

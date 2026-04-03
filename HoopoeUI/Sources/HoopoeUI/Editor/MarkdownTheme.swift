@@ -47,6 +47,81 @@ public struct MarkdownTheme: @unchecked Sendable {
         blockquoteColor: .secondaryLabelColor
     )
 
+    /// Fixed light appearance for users who explicitly disable system-following behavior.
+    public static let light = MarkdownTheme(
+        headingColors: [
+            NSColor(calibratedWhite: 0.08, alpha: 1),
+            NSColor(calibratedWhite: 0.08, alpha: 1),
+            NSColor(calibratedWhite: 0.2, alpha: 1),
+            NSColor(calibratedWhite: 0.2, alpha: 1),
+            NSColor(calibratedWhite: 0.35, alpha: 1),
+            NSColor(calibratedWhite: 0.35, alpha: 1),
+        ],
+        bodyFont: .systemFont(ofSize: 14),
+        headingFonts: default.headingFonts,
+        codeFont: .monospacedSystemFont(ofSize: 13, weight: .regular),
+        codeBackground: NSColor(calibratedWhite: 0.93, alpha: 1),
+        emphasisColor: NSColor(calibratedWhite: 0.08, alpha: 1),
+        strongColor: NSColor(calibratedWhite: 0.08, alpha: 1),
+        linkColor: NSColor.systemBlue,
+        listMarkerColor: NSColor(calibratedWhite: 0.45, alpha: 1),
+        blockquoteColor: NSColor(calibratedWhite: 0.35, alpha: 1)
+    )
+
+    /// Fixed dark appearance for users who explicitly force dark editor styling.
+    public static let dark = MarkdownTheme(
+        headingColors: [
+            NSColor(calibratedWhite: 0.95, alpha: 1),
+            NSColor(calibratedWhite: 0.95, alpha: 1),
+            NSColor(calibratedWhite: 0.82, alpha: 1),
+            NSColor(calibratedWhite: 0.82, alpha: 1),
+            NSColor(calibratedWhite: 0.68, alpha: 1),
+            NSColor(calibratedWhite: 0.68, alpha: 1),
+        ],
+        bodyFont: .systemFont(ofSize: 14),
+        headingFonts: default.headingFonts,
+        codeFont: .monospacedSystemFont(ofSize: 13, weight: .regular),
+        codeBackground: NSColor(calibratedWhite: 0.17, alpha: 1),
+        emphasisColor: NSColor(calibratedWhite: 0.95, alpha: 1),
+        strongColor: NSColor(calibratedWhite: 0.95, alpha: 1),
+        linkColor: NSColor(calibratedRed: 0.47, green: 0.74, blue: 1, alpha: 1),
+        listMarkerColor: NSColor(calibratedWhite: 0.58, alpha: 1),
+        blockquoteColor: NSColor(calibratedWhite: 0.68, alpha: 1)
+    )
+
+    /// Returns a theme variant whose fonts track the active editor font settings.
+    public func adapted(fontSize: CGFloat, usesMonospacedFont: Bool) -> MarkdownTheme {
+        let resolvedFontSize = max(1, fontSize)
+        let referenceBodySize = max(bodyFont.pointSize, 1)
+        let scale = resolvedFontSize / referenceBodySize
+        let resolvedBodyFont = usesMonospacedFont
+            ? NSFont.monospacedSystemFont(ofSize: resolvedFontSize, weight: .regular)
+            : NSFont.systemFont(ofSize: resolvedFontSize)
+        let headingWeight: NSFont.Weight = .bold
+        let resolvedHeadingFonts = headingFonts.map { template in
+            let scaledSize = max(11, template.pointSize * scale)
+            return usesMonospacedFont
+                ? NSFont.monospacedSystemFont(ofSize: scaledSize, weight: headingWeight)
+                : NSFont.systemFont(ofSize: scaledSize, weight: headingWeight)
+        }
+
+        return MarkdownTheme(
+            headingColors: headingColors,
+            bodyFont: resolvedBodyFont,
+            headingFonts: resolvedHeadingFonts,
+            codeFont: NSFont.monospacedSystemFont(
+                ofSize: max(11, resolvedFontSize - 1),
+                weight: .regular
+            ),
+            codeBackground: codeBackground,
+            emphasisColor: emphasisColor,
+            strongColor: strongColor,
+            linkColor: linkColor,
+            listMarkerColor: listMarkerColor,
+            blockquoteColor: blockquoteColor
+        )
+    }
+
     /// Returns the font for a heading at the given level (1-based).
     public func headingFont(level: Int) -> NSFont {
         let index = max(0, min(level - 1, headingFonts.count - 1))

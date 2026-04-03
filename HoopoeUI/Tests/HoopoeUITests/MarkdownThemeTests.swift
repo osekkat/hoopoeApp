@@ -93,6 +93,20 @@ final class MarkdownThemeTests: XCTestCase {
             "Code font should be monospaced"
         )
     }
+
+    func testAdaptedThemeTracksRequestedFontSize() {
+        let theme = MarkdownTheme.dark.adapted(fontSize: 18, usesMonospacedFont: true)
+
+        XCTAssertEqual(theme.bodyFont.pointSize, 18, accuracy: 0.01)
+        XCTAssertGreaterThan(theme.headingFonts[0].pointSize, theme.bodyFont.pointSize)
+        XCTAssertEqual(theme.codeFont.pointSize, 17, accuracy: 0.01)
+
+        let bodyTraits = NSFontManager.shared.traits(of: theme.bodyFont)
+        XCTAssertTrue(
+            bodyTraits.contains(.fixedPitchFontMask),
+            "Adapted body font should honor monospaced configuration"
+        )
+    }
 }
 
 /// Actor used to verify Sendable conformance at compile time.

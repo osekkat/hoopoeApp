@@ -278,9 +278,9 @@ struct RefinementPanelView: View {
 
         let stream = provider.send(
             prompt: userPrompt,
-            model: model,
+            model: model.id,
             system: PromptTemplates.planRefinementSystem,
-            options: LLMRequestOptions(temperature: 0.4, stream: true)
+            stream: true
         )
 
         state.phase = .refining

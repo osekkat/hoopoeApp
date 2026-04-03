@@ -439,8 +439,21 @@ struct PlanEditorRouteView: View {
         PlanEditorConfiguration(
             fontSize: CGFloat(settings.editorFontSize),
             wrapsLines: settings.editorLineWrapping,
-            showsLineNumbers: settings.editorShowLineNumbers
+            showsLineNumbers: settings.editorShowLineNumbers,
+            themeID: settings.editorTheme.rawValue,
+            markdownTheme: editorMarkdownTheme
         )
+    }
+
+    private var editorMarkdownTheme: MarkdownTheme {
+        switch settings.editorTheme {
+        case .light:
+            .light
+        case .dark:
+            .dark
+        case .system:
+            .default
+        }
     }
 
     private func sectionRange(named heading: String) -> NSRange {

@@ -161,9 +161,9 @@ public struct OpenAIProvider: LLMProvider, Sendable {
     ) async throws {
         let maxAttempts = 3
         var attempt = 0
+        let startTime = Date()
 
         while true {
-            let startTime = Date()
             let request = makeRequest(prompt: prompt, model: model, system: system, stream: stream)
 
             do {

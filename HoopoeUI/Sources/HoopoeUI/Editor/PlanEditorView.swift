@@ -8,6 +8,7 @@ public struct PlanEditorConfiguration {
     public let usesMonospacedFont: Bool
     public let wrapsLines: Bool
     public let showsLineNumbers: Bool
+    public let themeID: String
     public let markdownTheme: MarkdownTheme
 
     public init(
@@ -15,12 +16,14 @@ public struct PlanEditorConfiguration {
         usesMonospacedFont: Bool = true,
         wrapsLines: Bool = true,
         showsLineNumbers: Bool = true,
+        themeID: String = "system",
         markdownTheme: MarkdownTheme = .default
     ) {
         self.fontSize = fontSize
         self.usesMonospacedFont = usesMonospacedFont
         self.wrapsLines = wrapsLines
         self.showsLineNumbers = showsLineNumbers
+        self.themeID = themeID
         self.markdownTheme = markdownTheme
     }
 
@@ -32,11 +35,19 @@ public struct PlanEditorConfiguration {
         }
     }
 
+    var resolvedMarkdownTheme: MarkdownTheme {
+        markdownTheme.adapted(
+            fontSize: fontSize,
+            usesMonospacedFont: usesMonospacedFont
+        )
+    }
+
     func isEquivalent(to other: Self) -> Bool {
         fontSize == other.fontSize
             && usesMonospacedFont == other.usesMonospacedFont
             && wrapsLines == other.wrapsLines
             && showsLineNumbers == other.showsLineNumbers
+            && themeID == other.themeID
     }
 }
 
@@ -52,7 +63,7 @@ public final class PlanEditorView: NSView {
 
     public var configuration: PlanEditorConfiguration {
         didSet {
-            highlighter = MarkdownHighlighter(theme: configuration.markdownTheme)
+            highlighter = MarkdownHighlighter(theme: configuration.resolvedMarkdownTheme)
             applyConfiguration()
             rehighlightText(fullParse: true)
         }
@@ -94,7 +105,7 @@ public final class PlanEditorView: NSView {
 
         self.configuration = configuration
         self.onTextChange = onTextChange
-        self.highlighter = MarkdownHighlighter(theme: configuration.markdownTheme)
+        self.highlighter = MarkdownHighlighter(theme: configuration.resolvedMarkdownTheme)
         self.scrollView = scrollView
         self.textView = textView
         self.lineNumberRuler = lineNumberRuler
@@ -148,23 +159,13 @@ public final class PlanEditorView: NSView {
     }
 
     public func scrollToSection(_ heading: String) {
-        let needle = heading.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else {
+        guard let headingRange = Self.headingLineRange(
+            matching: heading,
+            in: textView.string
+        ) else {
             return
         }
-
-        let lines = textView.string.components(separatedBy: .newlines)
-        var location = 0
-
-        for line in lines {
-            let lineLength = (line as NSString).length
-            if line.hasPrefix("#"),
-               line.localizedCaseInsensitiveContains(needle) {
-                selectRange(NSRange(location: location, length: lineLength))
-                return
-            }
-            location += lineLength + 1
-        }
+        selectRange(headingRange)
     }
 
     // Programmatic editor control methods (insertText, selectRange,
@@ -223,6 +224,12 @@ public final class PlanEditorView: NSView {
     }
 
     private func applyConfiguration() {
+        let forcedAppearance = resolvedAppearance(for: configuration.themeID)
+        appearance = forcedAppearance
+        scrollView.appearance = forcedAppearance
+        textView.appearance = forcedAppearance
+        lineNumberRuler.appearance = forcedAppearance
+
         textView.font = configuration.baseFont
         textView.typingAttributes = [
             .font: configuration.baseFont,
@@ -244,8 +251,21 @@ public final class PlanEditorView: NSView {
         )
     }
 
+    private func resolvedAppearance(for themeID: String) -> NSAppearance? {
+        switch themeID {
+        case "light":
+            NSAppearance(named: .aqua)
+        case "dark":
+            NSAppearance(named: .darkAqua)
+        default:
+            nil
+        }
+    }
+
     private func applyText(_ newText: String, rehighlightIncrementally: Bool) {
         let selectedRanges = textView.selectedRanges
+        pendingCallback?.cancel()
+        pendingCallback = nil
         isApplyingProgrammaticChange = true
         textView.string = newText
         textView.selectedRanges = selectedRanges
@@ -298,13 +318,39 @@ public final class PlanEditorView: NSView {
 
     private func scheduleTextChangeCallback() {
         pendingCallback?.cancel()
-        let latestText = textView.string
         let workItem = DispatchWorkItem { [weak self] in
-            self?.textBinding?.wrappedValue = latestText
-            self?.onTextChange?(latestText)
+            guard let self else { return }
+            let latestText = self.textView.string
+            self.textBinding?.wrappedValue = latestText
+            self.onTextChange?(latestText)
+            self.pendingCallback = nil
         }
         pendingCallback = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(16), execute: workItem)
+    }
+
+    static func headingLineRange(matching heading: String, in text: String) -> NSRange? {
+        let needle = heading.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        var match: NSRange?
+        nsText.enumerateSubstrings(
+            in: NSRange(location: 0, length: nsText.length),
+            options: [.byLines]
+        ) { line, substringRange, _, stop in
+            guard let line,
+                  line.hasPrefix("#"),
+                  line.localizedCaseInsensitiveContains(needle)
+            else {
+                return
+            }
+            match = substringRange
+            stop.pointee = true
+        }
+        return match
     }
 
     private func observeTextStorage() {
@@ -557,7 +603,7 @@ public struct PlanEditorRepresentable: NSViewRepresentable {
         context.coordinator.attach(to: nsView)
         proxy?.connect(to: nsView)
 
-        if nsView.text != text, context.coordinator.lastKnownText != text {
+        if nsView.text != text {
             context.coordinator.isApplyingSwiftUIUpdate = true
             nsView.text = text
             context.coordinator.lastKnownText = text
