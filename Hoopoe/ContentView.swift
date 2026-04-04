@@ -1237,7 +1237,7 @@ struct ProjectPickerView: View {
     // MARK: - Actions
 
     private func browseForProject() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.async {
             let panel = NSOpenPanel()
             panel.title = "Open Project"
             panel.message = "Select a folder containing a git repository"
@@ -1405,8 +1405,9 @@ private struct NewProjectSheet: View {
                 }
             }
 
-            // Contextual input
+            // Contextual input — fixed height prevents sheet resize on mode change
             contextualSection
+                .frame(height: 70, alignment: .top)
 
             Divider()
 
@@ -1440,7 +1441,7 @@ private struct NewProjectSheet: View {
     private func modeCard(_ m: Mode) -> some View {
         let selected = mode == m
         return Button {
-            withAnimation(.easeInOut(duration: 0.15)) { mode = m }
+            mode = m
         } label: {
             VStack(spacing: 8) {
                 Image(systemName: m.icon)
@@ -1530,7 +1531,7 @@ private struct NewProjectSheet: View {
     // MARK: - Actions
 
     private func browseLocation() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.async {
             let panel = NSOpenPanel()
             panel.title = "Choose Location"
             panel.message = "Select the parent folder for your project"
@@ -1557,7 +1558,7 @@ private struct NewProjectSheet: View {
     }
 
     private func createEmpty() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.async {
             let panel = NSSavePanel()
             panel.title = "New Project"
             panel.message = "Enter a name for your project folder"
