@@ -39,7 +39,7 @@ enum PlanStoreError: LocalizedError {
 ///
 /// Designed so the backing storage can be swapped to SQLite (Rust engine) in Phase 2
 /// without changing callers.
-@Observable
+@MainActor @Observable
 final class PlanStore {
     /// All loaded plans, sorted by most recently updated.
     private(set) var plans: [PlanDocument] = []
@@ -56,7 +56,7 @@ final class PlanStore {
 
     // MARK: - Auto-save
 
-    private var autoSaveTask: Task<Void, Never>?
+    private nonisolated(unsafe) var autoSaveTask: Task<Void, Never>?
     private var autoSaveInterval: TimeInterval = 30
 
     /// Whether auto-save is active.
@@ -85,7 +85,7 @@ final class PlanStore {
     }
 
     deinit {
-        stopAutoSave()
+        autoSaveTask?.cancel()
     }
 
     // MARK: - CRUD Operations

@@ -325,7 +325,7 @@ private struct ProviderKeyRow: View {
                 if !isPrimary { onMakePrimary() }
             } label: {
                 Image(systemName: isPrimary ? "star.fill" : "star")
-                    .foregroundStyle(isPrimary ? .yellow : .tertiary)
+                    .foregroundStyle(isPrimary ? Color.yellow : Color.gray.opacity(0.5))
             }
             .buttonStyle(.plain)
             .help(isPrimary ? "Primary key" : "Make primary")

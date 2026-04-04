@@ -10,7 +10,7 @@ import TreeSitterMarkdown
 @MainActor
 public final class MarkdownHighlighter {
     private let parser: Parser
-    private var tree: Tree?
+    private var tree: MutableTree?
     private let theme: MarkdownTheme
 
     public init(theme: MarkdownTheme = .default) {
@@ -93,8 +93,8 @@ public final class MarkdownHighlighter {
         // TreeSitter reports byte offsets (UTF-8), but NSAttributedString uses
         // UTF-16 code unit offsets. Mixing them up corrupts ranges for non-ASCII text.
         let utf8 = text.utf8
-        let startByte = Int(node.startByte)
-        let endByte = Int(node.endByte)
+        let startByte = Int(node.byteRange.lowerBound)
+        let endByte = Int(node.byteRange.upperBound)
 
         guard startByte <= utf8.count, endByte <= utf8.count, startByte < endByte else { return }
 

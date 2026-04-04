@@ -6,6 +6,7 @@ import Testing
 // MARK: - PlanStore Tests (BUG FIX: save() error propagation)
 
 @Suite("PlanStore")
+@MainActor
 struct PlanStoreTests {
     /// Creates a temporary directory for each test, cleaned up after.
     private func withTempDir(_ body: (URL) throws -> Void) throws {

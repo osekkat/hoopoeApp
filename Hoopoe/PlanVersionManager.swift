@@ -5,7 +5,7 @@ import Observation
 ///
 /// Versions are created at intentional milestones (refinement rounds, synthesis, manual save),
 /// NOT on auto-save. The manager coordinates with PlanStore to persist versions in sidecar JSON.
-@Observable
+@MainActor @Observable
 final class PlanVersionManager {
     /// Maximum number of versions to retain per plan. Oldest versions are evicted first.
     var maxVersionsPerPlan: Int = 50

@@ -6,6 +6,7 @@ import Testing
 // MARK: - PlanVersionManager Tests
 
 @Suite("PlanVersionManager")
+@MainActor
 struct PlanVersionManagerTests {
     /// Creates a store in a temporary directory for testing.
     private func makeStore() -> PlanStore {

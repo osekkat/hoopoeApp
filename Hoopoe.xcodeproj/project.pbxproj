@@ -24,6 +24,10 @@
 		089C16C6293B2C5F00A1B2C3 /* ConvergenceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */; };
 		089C16C8293B2C5F00A1B2C3 /* ConvergenceMeterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */; };
 		089C16CA293B2C5F00A1B2C3 /* CompetingPlansView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */; };
+		AA12345A293B2C5F00A1B2C3 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA12345B293B2C5F00A1B2C3 /* MarkdownPreviewView.swift */; };
+		AA12345C293B2C5F00A1B2C3 /* PlanWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA12345D293B2C5F00A1B2C3 /* PlanWizardView.swift */; };
+		AA12345E293B2C5F00A1B2C3 /* RefinementPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA12345F293B2C5F00A1B2C3 /* RefinementPanelView.swift */; };
+		AA123460293B2C5F00A1B2C3 /* VersionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA123461293B2C5F00A1B2C3 /* VersionListView.swift */; };
 		089C1730293B2C5F00A1B2C3 /* PlanDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */; };
 		089C1731293B2C5F00A1B2C3 /* PlanStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */; };
 		089C1732293B2C5F00A1B2C3 /* DiffEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */; };
@@ -50,6 +54,10 @@
 		089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvergenceMetrics.swift; sourceTree = "<group>"; };
 		089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvergenceMeterView.swift; sourceTree = "<group>"; };
 		089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetingPlansView.swift; sourceTree = "<group>"; };
+		AA12345B293B2C5F00A1B2C3 /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
+		AA12345D293B2C5F00A1B2C3 /* PlanWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWizardView.swift; sourceTree = "<group>"; };
+		AA12345F293B2C5F00A1B2C3 /* RefinementPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefinementPanelView.swift; sourceTree = "<group>"; };
+		AA123461293B2C5F00A1B2C3 /* VersionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionListView.swift; sourceTree = "<group>"; };
 		089C1720293B2C5F00A1B2C3 /* PlanDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanDocumentTests.swift; sourceTree = "<group>"; };
 		089C1721293B2C5F00A1B2C3 /* PlanStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStoreTests.swift; sourceTree = "<group>"; };
 		089C1722293B2C5F00A1B2C3 /* DiffEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffEngineTests.swift; sourceTree = "<group>"; };
@@ -104,6 +112,10 @@
 				089C16C5293B2C5F00A1B2C3 /* ConvergenceMetrics.swift */,
 				089C16C7293B2C5F00A1B2C3 /* ConvergenceMeterView.swift */,
 				089C16C9293B2C5F00A1B2C3 /* CompetingPlansView.swift */,
+				AA12345B293B2C5F00A1B2C3 /* MarkdownPreviewView.swift */,
+				AA12345D293B2C5F00A1B2C3 /* PlanWizardView.swift */,
+				AA12345F293B2C5F00A1B2C3 /* RefinementPanelView.swift */,
+				AA123461293B2C5F00A1B2C3 /* VersionListView.swift */,
 				089C16A5293B2C5F00A1B2C3 /* Assets.xcassets */,
 				089C16A2293B2C5F00A1B2C3 /* Hoopoe.entitlements */,
 				089C16A7293B2C5F00A1B2C3 /* Preview Content */,
@@ -272,6 +284,10 @@
 				089C16C6293B2C5F00A1B2C3 /* ConvergenceMetrics.swift in Sources */,
 				089C16C8293B2C5F00A1B2C3 /* ConvergenceMeterView.swift in Sources */,
 				089C16CA293B2C5F00A1B2C3 /* CompetingPlansView.swift in Sources */,
+				AA12345A293B2C5F00A1B2C3 /* MarkdownPreviewView.swift in Sources */,
+				AA12345C293B2C5F00A1B2C3 /* PlanWizardView.swift in Sources */,
+				AA12345E293B2C5F00A1B2C3 /* RefinementPanelView.swift in Sources */,
+				AA123460293B2C5F00A1B2C3 /* VersionListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

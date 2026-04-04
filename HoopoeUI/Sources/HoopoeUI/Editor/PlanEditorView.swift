@@ -86,7 +86,7 @@ struct FoldedDisplayModel {
     }
 
     let text: String
-    let segments: [Segment]
+    fileprivate let segments: [Segment]
     let placeholderRanges: [String: NSRange]
     fileprivate let displayedSections: [DisplayedSection]
     let documentLength: Int
@@ -500,8 +500,8 @@ final class MarkdownSectionParser {
 
     private func nsRange(for node: Node, in text: String) -> NSRange? {
         let utf8 = text.utf8
-        let startByte = Int(node.startByte)
-        let endByte = Int(node.endByte)
+        let startByte = Int(node.byteRange.lowerBound)
+        let endByte = Int(node.byteRange.upperBound)
 
         guard startByte <= utf8.count, endByte <= utf8.count, startByte < endByte,
               let start = text.utf8.index(text.utf8.startIndex, offsetBy: startByte, limitedBy: text.utf8.endIndex),
@@ -580,7 +580,7 @@ public final class PlanEditorView: NSView {
     private var pendingEdit: PendingEdit?
     private var isApplyingProgrammaticChange = false
     private var pendingCallback: DispatchWorkItem?
-    private var textStorageObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var textStorageObserver: NSObjectProtocol?
     private var lastSelectedDocumentRange = NSRange(location: 0, length: 0)
 
     public init(
@@ -1181,8 +1181,8 @@ private final class LineNumberRulerView: NSRulerView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
     func updateAppearance(font: NSFont) {
@@ -1427,7 +1427,7 @@ public struct PlanEditorRepresentable: NSViewRepresentable {
         }
     }
 
-    public final class Coordinator: NSObject {
+    @MainActor public final class Coordinator: NSObject {
         private let text: Binding<String>
         private let onSelectionChange: ((NSRange) -> Void)?
         fileprivate var isApplyingSwiftUIUpdate = false

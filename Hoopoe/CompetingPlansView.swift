@@ -1,4 +1,5 @@
 import HoopoeUI
+import HoopoeUtils
 import SwiftUI
 
 // MARK: - Competing Plans Manager
@@ -56,6 +57,11 @@ final class CompetingPlansManager {
         case completed(text: String)
         case failed(String)
         case cancelled
+
+        var isStreaming: Bool {
+            if case .streaming = self { return true }
+            return false
+        }
     }
 
     /// Tracks the state of a single provider's response during competing generation.
@@ -183,12 +189,13 @@ final class CompetingPlansManager {
                     let provider = entry.provider
                     let modelID = entry.model.id
                     let resultID = self?.results[index].id ?? ""
+                    nonisolated(unsafe) let unsafeSelf = self
 
-                    group.addTask { @MainActor [weak self] in
-                        guard let self, !Task.isCancelled else { return }
+                    group.addTask {
+                        guard !Task.isCancelled, let mgr = unsafeSelf else { return }
 
                         let startTime = CFAbsoluteTimeGetCurrent()
-                        self.updatePhase(for: resultID, phase: .streaming)
+                        await mgr.updatePhase(for: resultID, phase: .streaming)
 
                         let stream = provider.send(
                             prompt: prompt,
@@ -200,17 +207,17 @@ final class CompetingPlansManager {
                         do {
                             for try await event in stream {
                                 guard !Task.isCancelled else {
-                                    self.updatePhase(for: resultID, phase: .cancelled)
+                                    await mgr.updatePhase(for: resultID, phase: .cancelled)
                                     return
                                 }
 
                                 switch event {
                                 case .text(let chunk):
-                                    self.appendText(for: resultID, chunk: chunk)
+                                    await mgr.appendText(for: resultID, chunk: chunk)
 
                                 case .done(let response):
                                     let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                                    self.completeResult(
+                                    await mgr.completeResult(
                                         for: resultID,
                                         text: response.fullText,
                                         tokenUsage: response.tokenUsage,
@@ -220,7 +227,7 @@ final class CompetingPlansManager {
                                     return
 
                                 case .error(let error):
-                                    self.updatePhase(
+                                    await mgr.updatePhase(
                                         for: resultID,
                                         phase: .failed(error.localizedDescription)
                                     )
@@ -228,12 +235,11 @@ final class CompetingPlansManager {
                                 }
                             }
                             // Stream ended without .done — use accumulated text
-                            if let idx = self.resultIndex(for: resultID),
-                               case .streaming = self.results[idx].phase
-                            {
+                            let idx = await mgr.resultIndex(for: resultID)
+                            if let idx, await mgr.results[idx].phase.isStreaming {
                                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-                                let accumulated = self.results[idx].streamingText
-                                self.completeResult(
+                                let accumulated = await mgr.results[idx].streamingText
+                                await mgr.completeResult(
                                     for: resultID,
                                     text: accumulated,
                                     tokenUsage: nil,
@@ -242,9 +248,9 @@ final class CompetingPlansManager {
                                 )
                             }
                         } catch is CancellationError {
-                            self.updatePhase(for: resultID, phase: .cancelled)
+                            await mgr.updatePhase(for: resultID, phase: .cancelled)
                         } catch {
-                            self.updatePhase(
+                            await mgr.updatePhase(
                                 for: resultID,
                                 phase: .failed(error.localizedDescription)
                             )

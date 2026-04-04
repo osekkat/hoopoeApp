@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// This class is designed to be accessed from `@MainActor` contexts
 /// and will serve as the basis for the HoopoeHost SettingsService in Phase 2+.
-@Observable
+@MainActor @Observable
 final class AppSettings {
     // MARK: - Shared Instance
 
