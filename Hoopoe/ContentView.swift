@@ -1167,8 +1167,171 @@ struct NoSelectionView: View {
     }
 }
 
+// MARK: - Project Picker
+
+struct ProjectPickerView: View {
+    let onOpen: (URL) -> Void
+
+    @State private var isDropTargeted = false
+
+    var body: some View {
+        VStack(spacing: 32) {
+            dropZone
+            newProjectRow
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Drop Zone
+
+    private var dropZone: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(.secondary)
+
+            Text("Open Project")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text("Drag a folder with .git or click to browse")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: 520, minHeight: 200)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    style: StrokeStyle(lineWidth: 1.5, dash: [8, 5])
+                )
+                .foregroundStyle(isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.4))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { browseForProject() }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
+    }
+
+    // MARK: - New Project
+
+    private var newProjectRow: some View {
+        HStack(spacing: 12) {
+            Text("Or start a new project")
+                .foregroundStyle(.secondary)
+
+            Button {
+                browseForNewProject()
+            } label: {
+                Label("New Project", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func browseForProject() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Project"
+        panel.message = "Select a folder containing a git repository"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if isGitRepo(url) {
+            onOpen(url)
+        } else {
+            showNotGitRepoAlert(url)
+        }
+    }
+
+    private func browseForNewProject() {
+        let panel = NSOpenPanel()
+        panel.title = "New Project"
+        panel.message = "Select or create a folder for your new project"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Initialize git if needed
+        if !isGitRepo(url) {
+            initGitRepo(at: url)
+        }
+
+        onOpen(url)
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil)
+                else { return }
+
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+                      isDir.boolValue
+                else { return }
+
+                Task { @MainActor in
+                    if isGitRepo(url) {
+                        onOpen(url)
+                    } else {
+                        showNotGitRepoAlert(url)
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private func isGitRepo(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        let gitPath = url.appendingPathComponent(".git").path
+        return FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir)
+    }
+
+    private func initGitRepo(at url: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["init"]
+        process.currentDirectoryURL = url
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    private func showNotGitRepoAlert(_ url: URL) {
+        let alert = NSAlert()
+        alert.messageText = "Not a Git Repository"
+        alert.informativeText = "\"\(url.lastPathComponent)\" does not contain a .git directory. Would you like to initialize one?"
+        alert.addButton(withTitle: "Initialize Git")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            initGitRepo(at: url)
+            onOpen(url)
+        }
+    }
+}
+
 // MARK: - Previews
 
-#Preview {
+#Preview("Project Picker") {
+    ProjectPickerView { url in
+        print("Opened: \(url)")
+    }
+    .frame(width: 700, height: 500)
+}
+
+#Preview("Main App") {
     ContentView()
 }

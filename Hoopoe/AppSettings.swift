@@ -19,6 +19,7 @@ final class AppSettings {
 
     private enum Key {
         static let defaultSaveDirectory = "defaultSaveDirectory"
+        static let lastProjectDirectory = "lastProjectDirectory"
         static let autoSaveEnabled = "autoSaveEnabled"
         static let autoSaveIntervalSeconds = "autoSaveIntervalSeconds"
         static let editorFontSize = "editorFontSize"
@@ -37,6 +38,17 @@ final class AppSettings {
     /// Directory where plans are saved by default.
     var defaultSaveDirectory: URL {
         didSet { defaults.set(defaultSaveDirectory.path, forKey: Key.defaultSaveDirectory) }
+    }
+
+    /// Last opened project directory (nil = show project picker on launch).
+    var lastProjectDirectory: URL? {
+        didSet {
+            if let dir = lastProjectDirectory {
+                defaults.set(dir.path, forKey: Key.lastProjectDirectory)
+            } else {
+                defaults.removeObject(forKey: Key.lastProjectDirectory)
+            }
+        }
     }
 
     /// Whether auto-save is enabled.
@@ -103,6 +115,12 @@ final class AppSettings {
             self.defaultSaveDirectory = URL(fileURLWithPath: path)
         } else {
             self.defaultSaveDirectory = defaultPlansDir
+        }
+
+        if let projectPath = defaults.string(forKey: Key.lastProjectDirectory) {
+            self.lastProjectDirectory = URL(fileURLWithPath: projectPath)
+        } else {
+            self.lastProjectDirectory = nil
         }
         self.autoSaveEnabled = defaults.bool(forKey: Key.autoSaveEnabled)
 
