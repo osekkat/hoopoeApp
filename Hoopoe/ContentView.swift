@@ -1172,7 +1172,6 @@ struct NoSelectionView: View {
 struct ProjectPickerView: View {
     let onOpen: (URL) -> Void
 
-    @State private var isDropTargeted = false
     @State private var showNewProjectSheet = false
 
     var body: some View {
@@ -1209,11 +1208,11 @@ struct ProjectPickerView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: 1.5, dash: [8, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.4))
+                .foregroundStyle(Color.secondary.opacity(0.4))
         )
         .contentShape(Rectangle())
         .onTapGesture { browseForProject() }
-        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
     }
