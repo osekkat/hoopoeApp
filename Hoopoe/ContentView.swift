@@ -1237,20 +1237,22 @@ struct ProjectPickerView: View {
     // MARK: - Actions
 
     private func browseForProject() {
-        let panel = NSOpenPanel()
-        panel.title = "Open Project"
-        panel.message = "Select a folder containing a git repository"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.title = "Open Project"
+            panel.message = "Select a folder containing a git repository"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = false
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+            guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        if isGitRepo(url) {
-            onOpen(url)
-        } else {
-            showNotGitRepoAlert(url)
+            if isGitRepo(url) {
+                onOpen(url)
+            } else {
+                showNotGitRepoAlert(url)
+            }
         }
     }
 
@@ -1528,17 +1530,19 @@ private struct NewProjectSheet: View {
     // MARK: - Actions
 
     private func browseLocation() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose Location"
-        panel.message = "Select the parent folder for your project"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.directoryURL = location
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.title = "Choose Location"
+            panel.message = "Select the parent folder for your project"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.directoryURL = location
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        location = url
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            location = url
+        }
     }
 
     private func performAction() {
@@ -1553,20 +1557,22 @@ private struct NewProjectSheet: View {
     }
 
     private func createEmpty() {
-        let panel = NSSavePanel()
-        panel.title = "New Project"
-        panel.message = "Enter a name for your project folder"
-        panel.directoryURL = location
-        panel.nameFieldLabel = "Project Name:"
-        panel.nameFieldStringValue = "MyProject"
+        DispatchQueue.main.async {
+            let panel = NSSavePanel()
+            panel.title = "New Project"
+            panel.message = "Enter a name for your project folder"
+            panel.directoryURL = location
+            panel.nameFieldLabel = "Project Name:"
+            panel.nameFieldStringValue = "MyProject"
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+            guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        initGitRepo(at: url)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            initGitRepo(at: url)
 
-        dismiss()
-        onOpen(url)
+            dismiss()
+            onOpen(url)
+        }
     }
 
     private func cloneRepo() {
