@@ -37,6 +37,9 @@
 		DD0A0001293B2C5F00A1B2C3 /* GuidedResponseParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0A0002293B2C5F00A1B2C3 /* GuidedResponseParserTests.swift */; };
 		DD0A0003293B2C5F00A1B2C3 /* GitInitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0A0004293B2C5F00A1B2C3 /* GitInitTests.swift */; };
 		DD0A0005293B2C5F00A1B2C3 /* GenerationFlowStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0A0006293B2C5F00A1B2C3 /* GenerationFlowStateTests.swift */; };
+		BB11110D293B2C5F00A1B2C3 /* markdown-it.min.js in Resources */ = {isa = PBXBuildFile; fileRef = BB11110A293B2C5F00A1B2C3 /* markdown-it.min.js */; };
+		BB11110E293B2C5F00A1B2C3 /* highlight.min.js in Resources */ = {isa = PBXBuildFile; fileRef = BB11110B293B2C5F00A1B2C3 /* highlight.min.js */; };
+		BB11110F293B2C5F00A1B2C3 /* morphdom-umd.min.js in Resources */ = {isa = PBXBuildFile; fileRef = BB11110C293B2C5F00A1B2C3 /* morphdom-umd.min.js */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,6 +74,9 @@
 		DD0A0004293B2C5F00A1B2C3 /* GitInitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitInitTests.swift; sourceTree = "<group>"; };
 		DD0A0006293B2C5F00A1B2C3 /* GenerationFlowStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationFlowStateTests.swift; sourceTree = "<group>"; };
 		089C1741293B2C5F00A1B2C3 /* HoopoeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HoopoeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB11110A293B2C5F00A1B2C3 /* markdown-it.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "markdown-it.min.js"; sourceTree = "<group>"; };
+		BB11110B293B2C5F00A1B2C3 /* highlight.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "highlight.min.js"; sourceTree = "<group>"; };
+		BB11110C293B2C5F00A1B2C3 /* morphdom-umd.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "morphdom-umd.min.js"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -122,6 +128,9 @@
 				AA12345D293B2C5F00A1B2C3 /* PlanWizardView.swift */,
 				AA12345F293B2C5F00A1B2C3 /* RefinementPanelView.swift */,
 				AA123461293B2C5F00A1B2C3 /* VersionListView.swift */,
+				BB11110A293B2C5F00A1B2C3 /* markdown-it.min.js */,
+				BB11110B293B2C5F00A1B2C3 /* highlight.min.js */,
+				BB11110C293B2C5F00A1B2C3 /* morphdom-umd.min.js */,
 				089C16A5293B2C5F00A1B2C3 /* Assets.xcassets */,
 				089C16A2293B2C5F00A1B2C3 /* Hoopoe.entitlements */,
 				089C16A7293B2C5F00A1B2C3 /* Preview Content */,
@@ -270,6 +279,9 @@
 			files = (
 				089C16B6293B2C5F00A1B2C3 /* Preview Assets.xcassets in Resources */,
 				089C16B5293B2C5F00A1B2C3 /* Assets.xcassets in Resources */,
+				BB11110D293B2C5F00A1B2C3 /* markdown-it.min.js in Resources */,
+				BB11110E293B2C5F00A1B2C3 /* highlight.min.js in Resources */,
+				BB11110F293B2C5F00A1B2C3 /* morphdom-umd.min.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

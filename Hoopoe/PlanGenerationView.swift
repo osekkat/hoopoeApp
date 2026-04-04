@@ -824,13 +824,10 @@ struct PlanGenerationView: View {
 
             case .generating:
                 VStack(spacing: 0) {
-                    ScrollView {
-                        Text(flowState.streamingText)
-                            .textSelection(.enabled)
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                    }
+                    MarkdownPreviewRepresentable(
+                        markdown: flowState.streamingText,
+                        scrollFraction: 1
+                    )
                     Divider()
                     streamingStatusBar
                 }
