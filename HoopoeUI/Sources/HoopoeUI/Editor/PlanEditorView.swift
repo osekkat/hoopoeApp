@@ -1192,7 +1192,8 @@ private final class LineNumberRulerView: NSRulerView {
 
     func updateSections(_ sections: [DisplayedSection]) {
         displayedSectionsByLocation = Dictionary(
-            uniqueKeysWithValues: sections.map { ($0.headingDisplayLocation, $0) }
+            sections.map { ($0.headingDisplayLocation, $0) },
+            uniquingKeysWith: { _, latest in latest }
         )
         invalidateLineNumbers()
     }

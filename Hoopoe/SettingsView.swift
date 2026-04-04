@@ -100,6 +100,17 @@ struct GeneralSettingsTab: View {
 // MARK: - Providers Settings Tab
 
 struct ProvidersSettingsTab: View {
+    @State private var anthropicKey = ""
+    @State private var openaiKey = ""
+    @State private var geminiKey = ""
+    @State private var saveMessage: String?
+
+    private let keychain = KeychainService()
+
+    private var hasUnsavedKeys: Bool {
+        !anthropicKey.isEmpty || !openaiKey.isEmpty || !geminiKey.isEmpty
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -107,22 +118,72 @@ struct ProvidersSettingsTab: View {
                     providerName: "Claude (Anthropic)",
                     providerKey: KeychainService.Provider.anthropic.rawValue,
                     icon: "brain.head.profile",
-                    keyHint: "sk-ant-..."
+                    keyHint: "sk-ant-...",
+                    newKeyText: $anthropicKey
                 )
                 ProviderSection(
                     providerName: "OpenAI (GPT)",
                     providerKey: KeychainService.Provider.openai.rawValue,
                     icon: "sparkles",
-                    keyHint: "sk-..."
+                    keyHint: "sk-...",
+                    newKeyText: $openaiKey
                 )
                 ProviderSection(
                     providerName: "Google (Gemini)",
                     providerKey: KeychainService.Provider.google.rawValue,
                     icon: "globe",
-                    keyHint: "AI..."
+                    keyHint: "AI...",
+                    newKeyText: $geminiKey
                 )
+
+                Divider()
+
+                HStack {
+                    if let message = saveMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(message.contains("Saved") ? .green : .red)
+                    }
+
+                    Spacer()
+
+                    Button("Save") {
+                        saveAll()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!hasUnsavedKeys)
+                }
             }
             .padding()
+        }
+    }
+
+    private func saveAll() {
+        let entries: [(key: String, provider: String)] = [
+            (anthropicKey, KeychainService.Provider.anthropic.rawValue),
+            (openaiKey, KeychainService.Provider.openai.rawValue),
+            (geminiKey, KeychainService.Provider.google.rawValue),
+        ]
+
+        Task {
+            var savedCount = 0
+            for entry in entries where !entry.key.isEmpty {
+                do {
+                    try await keychain.upsert(secret: entry.key, provider: entry.provider, account: "default")
+                    savedCount += 1
+                } catch {
+                    saveMessage = "Failed to save: \(error.localizedDescription)"
+                    return
+                }
+            }
+
+            anthropicKey = ""
+            openaiKey = ""
+            geminiKey = ""
+            saveMessage = "Saved \(savedCount) key\(savedCount == 1 ? "" : "s")"
+
+            try? await Task.sleep(for: .seconds(3))
+            if saveMessage?.contains("Saved") == true { saveMessage = nil }
         }
     }
 }
@@ -134,19 +195,17 @@ private struct ProviderSection: View {
     let providerKey: String
     let icon: String
     let keyHint: String
+    @Binding var newKeyText: String
 
     @State private var keys: [ProviderKeyEntry] = []
-    @State private var newKeyText = ""
-    @State private var newKeyAccount = "default"
     @State private var isExpanded = true
-    @State private var validationMessage: String?
+    @State private var errorMessage: String?
 
     private let keychain = KeychainService()
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 8) {
-                // Existing keys
                 if keys.isEmpty {
                     Text("No API keys configured")
                         .foregroundStyle(.tertiary)
@@ -165,37 +224,13 @@ private struct ProviderSection: View {
 
                 Divider()
 
-                // Add new key
-                HStack(spacing: 8) {
-                    SecureField(keyHint, text: $newKeyText)
-                        .textFieldStyle(.roundedBorder)
+                SecureField(keyHint, text: $newKeyText)
+                    .textFieldStyle(.roundedBorder)
 
-                    if !keys.isEmpty {
-                        TextField("Label", text: $newKeyAccount)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 80)
-                    }
-
-                    Button {
-                        addKey()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    .disabled(newKeyText.isEmpty)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.green)
-
-                    Button("Test") {
-                        validateKey()
-                    }
-                    .disabled(newKeyText.isEmpty)
-                    .controlSize(.small)
-                }
-
-                if let message = validationMessage {
+                if let message = errorMessage {
                     Text(message)
                         .font(.caption)
-                        .foregroundStyle(message.contains("Valid") ? .green : .red)
+                        .foregroundStyle(.red)
                 }
             }
             .padding(.leading, 4)
@@ -207,6 +242,10 @@ private struct ProviderSection: View {
         .background(.background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task { await loadKeys() }
+    }
+
+    func reloadKeys() async {
+        await loadKeys()
     }
 
     private func loadKeys() async {
@@ -235,69 +274,40 @@ private struct ProviderSection: View {
         }
     }
 
-    private func addKey() {
-        let account = keys.isEmpty ? "default" : newKeyAccount
-        Task {
-            do {
-                try await keychain.upsert(secret: newKeyText, provider: providerKey, account: account)
-                newKeyText = ""
-                newKeyAccount = "default"
-                validationMessage = nil
-                await loadKeys()
-            } catch {
-                validationMessage = "Failed to save: \(error.localizedDescription)"
-            }
-        }
-    }
-
     private func deleteKey(_ entry: ProviderKeyEntry) {
         Task {
             do {
                 try await keychain.delete(provider: providerKey, account: entry.account)
                 await loadKeys()
             } catch {
-                validationMessage = "Failed to delete: \(error.localizedDescription)"
+                errorMessage = "Failed to delete: \(error.localizedDescription)"
             }
         }
     }
 
     private func makePrimary(_ entry: ProviderKeyEntry) {
-        // Swap: promoted key becomes "default", old "default" takes the promoted key's account name
         Task {
             do {
                 let promotedSecret = try await keychain.retrieve(provider: providerKey, account: entry.account)
 
-                // Retrieve old default if it exists, so we can preserve it under the swapped name
                 var oldDefaultSecret: String?
                 do {
                     oldDefaultSecret = try await keychain.retrieve(provider: providerKey, account: "default")
-                } catch {
-                    // No existing default — nothing to swap
-                }
+                } catch {}
 
-                // Delete both entries before re-inserting to avoid duplicate errors
                 try? await keychain.delete(provider: providerKey, account: entry.account)
                 try? await keychain.delete(provider: providerKey, account: "default")
 
-                // Promoted key → "default"
                 try await keychain.store(secret: promotedSecret, provider: providerKey, account: "default")
 
-                // Old default → promoted key's old account name (if there was an old default)
                 if let oldSecret = oldDefaultSecret {
                     try await keychain.store(secret: oldSecret, provider: providerKey, account: entry.account)
                 }
 
                 await loadKeys()
             } catch {
-                validationMessage = "Failed to set primary: \(error.localizedDescription)"
+                errorMessage = "Failed to set primary: \(error.localizedDescription)"
             }
-        }
-    }
-
-    private func validateKey() {
-        Task {
-            let isValid = await keychain.validateKeyFormat(key: newKeyText, provider: providerKey)
-            validationMessage = isValid ? "Valid format" : "Invalid format for \(providerName)"
         }
     }
 }

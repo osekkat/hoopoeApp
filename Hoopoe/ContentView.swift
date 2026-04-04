@@ -230,7 +230,7 @@ struct ContentView: View {
     private var mainContent: some View {
         switch router.currentRoute {
         case .plansHome:
-            PlansHomeView(router: router)
+            PlansHomeView(router: router, planStore: planStore)
         case let .planEditor(planId):
             if let plan = plan(for: planId) {
                 PlanEditorRouteView(plan: plan, router: router)
@@ -584,10 +584,12 @@ struct InspectorPanel: View {
 
 struct PlansHomeView: View {
     let router: NavigationRouter
-    private let settings = AppSettings.shared
+    let planStore: PlanStore
 
     var body: some View {
-        if settings.hasCompletedOnboarding {
+        if planStore.plans.isEmpty {
+            OnboardingCardView(router: router)
+        } else {
             RoutePlaceholderCard(
                 systemImage: "doc.text.magnifyingglass",
                 title: "Plans",
@@ -598,8 +600,6 @@ struct PlansHomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-        } else {
-            OnboardingCardView(router: router)
         }
     }
 }
