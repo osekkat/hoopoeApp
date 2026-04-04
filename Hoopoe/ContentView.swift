@@ -59,8 +59,6 @@ enum HoopoeRoute: Codable, Hashable, Sendable {
 @MainActor
 @Observable
 final class NavigationRouter {
-    static let samplePlanID = UUID(uuidString: "9A40E5A4-BB46-4D9F-A8B2-1803D568F8E0")!
-
     private(set) var currentRoute: HoopoeRoute?
     private(set) var backStack: [HoopoeRoute]
     private(set) var forwardStack: [HoopoeRoute] = []
@@ -149,33 +147,6 @@ final class NavigationRouter {
 
 // MARK: - Main Content View
 
-private enum SamplePlanSeed {
-    static let title = "Hoopoe Planning Sandbox"
-    static let content = """
-    # Hoopoe Planning Sandbox
-
-    ## Goals
-    - Capture the project vision in a form that can survive multiple refinement rounds.
-    - Keep the editor responsive while long markdown documents grow.
-    - Make section-level navigation easy from surrounding SwiftUI controls.
-
-    ## Constraints
-    - The editing surface is AppKit-backed for performance.
-    - The hosting shell is SwiftUI and should own navigation state.
-    - Cursor position must survive SwiftUI update passes.
-
-    ## Architecture
-    - `PlanEditorRepresentable` bridges SwiftUI into `PlanEditorView`.
-    - `PlanEditorProxy` exposes scroll, insert, and selection commands.
-    - The editor route owns the bound markdown string and secondary controls.
-
-    ## Testing Strategy
-    - Verify typing does not flicker or recreate the editor.
-    - Verify toolbar actions mutate or navigate the AppKit view.
-    - Verify selection state flows back into SwiftUI.
-    """
-}
-
 struct ContentView: View {
     private let settings = AppSettings.shared
     @State private var router = NavigationRouter()
@@ -186,7 +157,6 @@ struct ContentView: View {
     init() {
         let store = PlanStore(directory: AppSettings.shared.defaultSaveDirectory)
         try? store.loadAll()
-        Self.ensureSamplePlan(in: store)
         _planStore = State(initialValue: store)
         _versionManager = State(initialValue: PlanVersionManager(store: store))
     }
@@ -302,7 +272,6 @@ struct ContentView: View {
         planStore.saveAllDirty()
         planStore.storeDirectory = directory
         try? planStore.loadAll()
-        Self.ensureSamplePlan(in: planStore)
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -325,18 +294,6 @@ struct ContentView: View {
         return handled
     }
 
-    private static func ensureSamplePlan(in store: PlanStore) {
-        guard store.plans.contains(where: { $0.id == NavigationRouter.samplePlanID }) == false else {
-            return
-        }
-
-        let samplePlan = store.createPlan(
-            id: NavigationRouter.samplePlanID,
-            title: SamplePlanSeed.title,
-            content: SamplePlanSeed.content
-        )
-        try? store.save(samplePlan)
-    }
 }
 
 // MARK: - Sidebar
