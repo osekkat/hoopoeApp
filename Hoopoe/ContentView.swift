@@ -1237,7 +1237,7 @@ struct ProjectPickerView: View {
     // MARK: - Actions
 
     private func browseForProject() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             let panel = NSOpenPanel()
             panel.title = "Open Project"
             panel.message = "Select a folder containing a git repository"
@@ -1530,7 +1530,7 @@ private struct NewProjectSheet: View {
     // MARK: - Actions
 
     private func browseLocation() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             let panel = NSOpenPanel()
             panel.title = "Choose Location"
             panel.message = "Select the parent folder for your project"
@@ -1557,7 +1557,7 @@ private struct NewProjectSheet: View {
     }
 
     private func createEmpty() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             let panel = NSSavePanel()
             panel.title = "New Project"
             panel.message = "Enter a name for your project folder"
