@@ -1286,12 +1286,7 @@ struct ProjectPickerView: View {
     }
 
     private func initGitRepo(at url: URL) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["init"]
-        process.currentDirectoryURL = url
-        try? process.run()
-        process.waitUntilExit()
+        initGitRepoWithFileManager(at: url)
     }
 
     private func showNotGitRepoAlert(_ url: URL) {
@@ -1656,13 +1651,41 @@ private struct NewProjectSheet: View {
     }
 
     private func initGitRepo(at url: URL) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["init"]
-        process.currentDirectoryURL = url
-        try? process.run()
-        process.waitUntilExit()
+        initGitRepoWithFileManager(at: url)
     }
+}
+
+/// Sandbox-safe git repo initialization using FileManager instead of /usr/bin/git (which is
+/// an xcrun shim that refuses to run inside an App Sandbox).
+private func initGitRepoWithFileManager(at url: URL) {
+    let fm = FileManager.default
+    let git = url.appendingPathComponent(".git", isDirectory: true)
+
+    let dirs = [
+        git,
+        git.appendingPathComponent("objects/info", isDirectory: true),
+        git.appendingPathComponent("objects/pack", isDirectory: true),
+        git.appendingPathComponent("refs/heads", isDirectory: true),
+        git.appendingPathComponent("refs/tags", isDirectory: true),
+    ]
+    for dir in dirs {
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    let head = "ref: refs/heads/main\n"
+    try? head.write(to: git.appendingPathComponent("HEAD"), atomically: true, encoding: .utf8)
+
+    let config = """
+    [core]
+    \trepositoryformatversion = 0
+    \tfilemode = true
+    \tbare = false
+    \tlogallref = true
+    \tignorecase = true
+    \tprecomposeunicode = true
+
+    """
+    try? config.write(to: git.appendingPathComponent("config"), atomically: true, encoding: .utf8)
 }
 
 // MARK: - Previews
