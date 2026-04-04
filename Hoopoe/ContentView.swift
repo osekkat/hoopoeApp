@@ -1346,6 +1346,7 @@ private struct NewProjectSheet: View {
     @State private var location: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Projects", isDirectory: true)
     @State private var cloneURL = ""
+    @State private var isCreating = false
     @State private var isCloning = false
     @State private var cloneError: String?
 
@@ -1408,10 +1409,17 @@ private struct NewProjectSheet: View {
 
                 Spacer()
 
-                if isCloning {
+                if isCreating || isCloning {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.trailing, 8)
+
+                    if isCreating {
+                        Text("Creating project…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.trailing, 8)
+                    }
                 }
 
                 Button(mode.actionLabel) {
@@ -1493,7 +1501,7 @@ private struct NewProjectSheet: View {
     private var canPerformAction: Bool {
         switch mode {
         case .empty:
-            true
+            !isCreating
         case .clone:
             !cloneURL.trimmingCharacters(in: .whitespaces).isEmpty && !isCloning
         }
@@ -1537,11 +1545,16 @@ private struct NewProjectSheet: View {
 
             guard panel.runModal() == .OK, let url = panel.url else { return }
 
-            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-            initGitRepo(at: url)
+            isCreating = true
 
-            dismiss()
-            onOpen(url)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                initGitRepoWithFileManager(at: url)
+                isCreating = false
+                dismiss()
+                onOpen(url)
+            }
         }
     }
 
