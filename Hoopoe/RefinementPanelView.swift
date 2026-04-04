@@ -99,7 +99,10 @@ struct RefinementPanelView: View {
 
             Spacer()
 
-            if registry.configuredProviders.isEmpty {
+            if isLoadingProviders {
+                ProgressView()
+                    .controlSize(.small)
+            } else if registry.configuredProviders.isEmpty {
                 Label("No providers configured", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                     .font(.callout)
@@ -144,7 +147,7 @@ struct RefinementPanelView: View {
         } label: {
             Label(state.isRefining ? "Refining..." : "Refine", systemImage: "arrow.triangle.2.circlepath")
         }
-        .disabled(state.isRefining || registry.configuredProviders.isEmpty)
+        .disabled(state.isRefining || isLoadingProviders || registry.configuredProviders.isEmpty)
 
         if state.completedText != nil {
             Button("Accept") { acceptRefinement() }
