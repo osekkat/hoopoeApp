@@ -1080,12 +1080,13 @@ public final class PlanEditorView: NSView {
     }
 
     private func foldAllSections() {
+        let anchorSelection = currentFoldableSection()?.headingRange ?? currentDocumentSelectionRange()
         let nextCollapsedIDs = Set(sections.filter(\.isFoldable).map(\.identifier))
         guard nextCollapsedIDs != collapsedSectionIDs else {
             return
         }
         collapsedSectionIDs = nextCollapsedIDs
-        refreshDisplay(fullParse: true, preferredSelection: currentDocumentSelectionRange())
+        refreshDisplay(fullParse: true, preferredSelection: anchorSelection)
     }
 
     private func makePendingEdit(for range: NSRange, replacement: String?) -> PendingEdit? {

@@ -268,6 +268,117 @@ final class CompetingPlansManagerTests: XCTestCase {
         XCTAssertEqual(manager.results.first?.completedText, "Second run")
     }
 
+    // MARK: - Section Highlighting
+
+    func testParseSectionsSplitsMarkdownByHeading() {
+        let markdown = """
+        Intro summary
+
+        # Architecture
+        Use a modular shell.
+
+        ## Testing
+        Add regression coverage.
+        """
+
+        let sections = CompetingPlansManager.parseSections(from: markdown)
+
+        XCTAssertEqual(sections.map(\.title), ["Overview", "Architecture", "Testing"])
+        XCTAssertEqual(sections[0].plainText, "Intro summary")
+        XCTAssertEqual(sections[1].bodyMarkdown, "Use a modular shell.")
+        XCTAssertEqual(sections[2].level, 2)
+    }
+
+    func testToggleHighlightAddsAndRemovesSection() {
+        let manager = CompetingPlansManager()
+        var result = CompetingPlansManager.ProviderResult(
+            id: "anthropic::opus",
+            providerID: "anthropic",
+            providerName: "Anthropic",
+            modelID: "opus",
+            modelName: "Opus",
+            providerIcon: "brain"
+        )
+        result.phase = .completed(text: "# Architecture\nUse a modular shell.")
+        manager.results = [result]
+
+        let section = manager.sections(for: result)[0]
+        XCTAssertFalse(manager.hasHighlights)
+
+        manager.toggleHighlight(for: result, section: section)
+
+        XCTAssertTrue(manager.hasHighlights)
+        XCTAssertEqual(manager.highlights.count, 1)
+        XCTAssertEqual(manager.highlights[0].sectionTitle, "Architecture")
+        XCTAssertEqual(manager.highlights[0].providerName, "Anthropic")
+
+        manager.toggleHighlight(for: result, section: section)
+
+        XCTAssertFalse(manager.hasHighlights)
+        XCTAssertTrue(manager.highlights.isEmpty)
+    }
+
+    func testSynthesisHighlightsPromptIncludesGroupedContextAndNotes() {
+        let manager = CompetingPlansManager()
+
+        var first = CompetingPlansManager.ProviderResult(
+            id: "anthropic::opus",
+            providerID: "anthropic",
+            providerName: "Anthropic",
+            modelID: "opus",
+            modelName: "Opus",
+            providerIcon: "brain"
+        )
+        first.phase = .completed(text: "# Architecture\nUse a modular shell.")
+
+        var second = CompetingPlansManager.ProviderResult(
+            id: "openai::gpt",
+            providerID: "openai",
+            providerName: "OpenAI",
+            modelID: "gpt",
+            modelName: "GPT",
+            providerIcon: "sparkles"
+        )
+        second.phase = .completed(text: "# Testing\nAdd regression coverage.")
+
+        manager.results = [first, second]
+
+        let firstSection = manager.sections(for: first)[0]
+        let secondSection = manager.sections(for: second)[0]
+        manager.toggleHighlight(for: first, section: firstSection)
+        manager.toggleHighlight(for: second, section: secondSection)
+        manager.updateHighlightNote(id: manager.highlights[0].id, note: "Prefer this structure.")
+
+        let prompt = manager.synthesisHighlightsPrompt()
+
+        XCTAssertTrue(prompt.contains("Anthropic (Opus)"))
+        XCTAssertTrue(prompt.contains("OpenAI (GPT)"))
+        XCTAssertTrue(prompt.contains("#### Architecture"))
+        XCTAssertTrue(prompt.contains("#### Testing"))
+        XCTAssertTrue(prompt.contains("Use a modular shell."))
+        XCTAssertTrue(prompt.contains("Prefer this structure."))
+    }
+
+    func testStartCompetingRequestsClearsExistingHighlights() {
+        let manager = CompetingPlansManager()
+        var result = CompetingPlansManager.ProviderResult(
+            id: "anthropic::opus",
+            providerID: "anthropic",
+            providerName: "Anthropic",
+            modelID: "opus",
+            modelName: "Opus",
+            providerIcon: "brain"
+        )
+        result.phase = .completed(text: "# Architecture\nUse a modular shell.")
+        manager.results = [result]
+        manager.toggleHighlight(for: result, section: manager.sections(for: result)[0])
+        XCTAssertTrue(manager.hasHighlights)
+
+        manager.startCompetingRequests(prompt: "Regenerate", system: nil, registry: ProviderRegistry())
+
+        XCTAssertFalse(manager.hasHighlights)
+    }
+
     // MARK: - Helpers
 
     private func makeRegistry(providerCount: Int) -> ProviderRegistry {
@@ -295,7 +406,7 @@ final class CompetingPlansManagerTests: XCTestCase {
 // MARK: - Mock LLM Provider
 
 /// Test double for LLMProvider with configurable behavior.
-struct MockLLMProvider: LLMProvider, @unchecked Sendable {
+struct MockLLMProvider: LLMProvider, Sendable {
     enum Behavior: Sendable {
         case succeedWith(String)
         case succeedWithCost(String, cost: Double)

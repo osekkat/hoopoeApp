@@ -15,6 +15,41 @@ final class CompetingPlansManager {
 
     // MARK: - Types
 
+    struct PlanSection: Identifiable, Hashable, Sendable {
+        let id: String
+        let title: String
+        let level: Int
+        let markdown: String
+        let bodyMarkdown: String
+        let plainText: String
+
+        var excerpt: String {
+            let normalized = plainText.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            guard normalized.count > 140 else { return normalized }
+            return String(normalized.prefix(137)) + "..."
+        }
+    }
+
+    struct SectionHighlight: Identifiable, Hashable, Sendable {
+        let id: String
+        let resultID: String
+        let providerID: String
+        let providerName: String
+        let modelID: String
+        let modelName: String
+        let sectionID: String
+        let sectionTitle: String
+        let sectionMarkdown: String
+        let excerpt: String
+        var note: String
+    }
+
+    struct HighlightGroup: Identifiable, Sendable {
+        let id: String
+        let result: ProviderResult
+        let highlights: [SectionHighlight]
+    }
+
     enum ProviderPhase: Sendable {
         case waiting
         case streaming
@@ -68,6 +103,7 @@ final class CompetingPlansManager {
     // MARK: - State
 
     var results: [ProviderResult] = []
+    var highlights: [SectionHighlight] = []
     var isRunning = false
     private var groupTask: Task<Void, Never>?
 
@@ -83,7 +119,7 @@ final class CompetingPlansManager {
 
     /// Whether all providers have finished (success, failure, or cancellation).
     var allFinished: Bool {
-        !results.isEmpty && results.allSatisfy { !$0.isActive }
+        results.allSatisfy { !$0.isActive }
     }
 
     /// Results that completed successfully, sorted by latency (fastest first).
@@ -98,6 +134,18 @@ final class CompetingPlansManager {
         successfulResults.count >= 2
     }
 
+    var hasHighlights: Bool {
+        !highlights.isEmpty
+    }
+
+    var highlightGroups: [HighlightGroup] {
+        results.compactMap { result in
+            let matches = highlights.filter { $0.resultID == result.id }
+            guard !matches.isEmpty else { return nil }
+            return HighlightGroup(id: result.id, result: result, highlights: matches)
+        }
+    }
+
     // MARK: - Actions
 
     /// Sends the prompt to all configured providers in parallel.
@@ -107,6 +155,7 @@ final class CompetingPlansManager {
         registry: ProviderRegistry
     ) {
         cancel()
+        highlights = []
 
         let entries = registry.allModels
         guard !entries.isEmpty else { return }
@@ -224,7 +273,138 @@ final class CompetingPlansManager {
         updatePhase(for: resultID, phase: .cancelled)
     }
 
+    func sections(for result: ProviderResult) -> [PlanSection] {
+        guard let text = result.completedText else { return [] }
+        return Self.parseSections(from: text)
+    }
+
+    func isHighlighted(_ section: PlanSection, in result: ProviderResult) -> Bool {
+        highlights.contains { $0.resultID == result.id && $0.sectionID == section.id }
+    }
+
+    func toggleHighlight(for result: ProviderResult, section: PlanSection) {
+        if let index = highlights.firstIndex(where: { $0.resultID == result.id && $0.sectionID == section.id }) {
+            highlights.remove(at: index)
+            return
+        }
+
+        highlights.append(
+            SectionHighlight(
+                id: "\(result.id)::\(section.id)",
+                resultID: result.id,
+                providerID: result.providerID,
+                providerName: result.providerName,
+                modelID: result.modelID,
+                modelName: result.modelName,
+                sectionID: section.id,
+                sectionTitle: section.title,
+                sectionMarkdown: section.markdown,
+                excerpt: section.excerpt,
+                note: ""
+            )
+        )
+    }
+
+    func clearHighlights(for resultID: String? = nil) {
+        guard let resultID else {
+            highlights.removeAll()
+            return
+        }
+        highlights.removeAll { $0.resultID == resultID }
+    }
+
+    func removeHighlight(id: String) {
+        highlights.removeAll { $0.id == id }
+    }
+
+    func updateHighlightNote(id: String, note: String) {
+        guard let index = highlights.firstIndex(where: { $0.id == id }) else { return }
+        highlights[index].note = note
+    }
+
+    func synthesisHighlightsPrompt() -> String {
+        guard hasHighlights else { return "" }
+
+        var lines = ["User-preferred sections:", ""]
+        for group in highlightGroups {
+            lines.append("### \(group.result.providerName) (\(group.result.modelName))")
+            for highlight in group.highlights {
+                lines.append("#### \(highlight.sectionTitle)")
+                lines.append(highlight.sectionMarkdown)
+                let trimmedNote = highlight.note.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedNote.isEmpty {
+                    lines.append("")
+                    lines.append("User note: \(trimmedNote)")
+                }
+                lines.append("")
+            }
+        }
+
+        return lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Internal Helpers
+
+    static func parseSections(from markdown: String) -> [PlanSection] {
+        let trimmedDocument = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDocument.isEmpty else { return [] }
+
+        let lines = markdown.components(separatedBy: "\n")
+        var sections: [PlanSection] = []
+        var currentLines: [String] = []
+        var currentTitle = "Overview"
+        var currentLevel = 1
+        var sectionIndex = 0
+
+        func flushCurrentSection() {
+            let fullMarkdown = currentLines.joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !fullMarkdown.isEmpty else {
+                currentLines.removeAll(keepingCapacity: true)
+                return
+            }
+
+            let bodyLines: [String]
+            if currentLines.first.flatMap(Self.parseHeading(from:)) != nil {
+                bodyLines = Array(currentLines.dropFirst())
+            } else {
+                bodyLines = currentLines
+            }
+            let bodyMarkdown = bodyLines.joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let plainText = Self.makePlainText(from: bodyMarkdown.isEmpty ? fullMarkdown : bodyMarkdown)
+            let slug = Self.slug(for: currentTitle)
+
+            sections.append(
+                PlanSection(
+                    id: "\(slug)-\(sectionIndex)",
+                    title: currentTitle,
+                    level: currentLevel,
+                    markdown: fullMarkdown,
+                    bodyMarkdown: bodyMarkdown,
+                    plainText: plainText
+                )
+            )
+
+            sectionIndex += 1
+            currentLines.removeAll(keepingCapacity: true)
+        }
+
+        for line in lines {
+            if let heading = Self.parseHeading(from: line) {
+                flushCurrentSection()
+                currentTitle = heading.title
+                currentLevel = heading.level
+                currentLines = [line]
+            } else {
+                currentLines.append(line)
+            }
+        }
+
+        flushCurrentSection()
+        return sections
+    }
 
     private func resultIndex(for id: String) -> Int? {
         results.firstIndex(where: { $0.id == id })
@@ -263,6 +443,81 @@ final class CompetingPlansManager {
         default: "cpu"
         }
     }
+
+    private static func parseHeading(from line: String) -> (level: Int, title: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("#") else { return nil }
+
+        var level = 0
+        for character in trimmed {
+            if character == "#" {
+                level += 1
+            } else {
+                break
+            }
+        }
+
+        guard level > 0, trimmed.count > level else { return nil }
+        let markerEnd = trimmed.index(trimmed.startIndex, offsetBy: level)
+        guard trimmed[markerEnd] == " " else { return nil }
+
+        let title = String(trimmed[trimmed.index(after: markerEnd)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        return (level, title)
+    }
+
+    private static func slug(for title: String) -> String {
+        let lowered = title.lowercased()
+        var slug = ""
+        var previousWasDash = false
+
+        for scalar in lowered.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(scalar)
+                previousWasDash = false
+            } else if !previousWasDash {
+                slug.append("-")
+                previousWasDash = true
+            }
+        }
+
+        let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "section" : trimmed
+    }
+
+    private static func makePlainText(from markdown: String) -> String {
+        markdown
+            .components(separatedBy: "\n")
+            .map { line -> String in
+                if let heading = parseHeading(from: line) {
+                    return heading.title
+                }
+
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                    return String(trimmed.dropFirst(2))
+                }
+
+                if let periodIndex = trimmed.firstIndex(of: "."),
+                   trimmed[..<periodIndex].allSatisfy(\.isNumber)
+                {
+                    let afterPeriod = trimmed.index(after: periodIndex)
+                    if afterPeriod < trimmed.endIndex, trimmed[afterPeriod] == " " {
+                        return String(trimmed[trimmed.index(after: afterPeriod)...])
+                    }
+                }
+
+                return trimmed
+                    .replacingOccurrences(of: "`", with: "")
+                    .replacingOccurrences(of: "*", with: "")
+                    .replacingOccurrences(of: "_", with: "")
+                    .replacingOccurrences(of: ">", with: "")
+                    .replacingOccurrences(of: "#", with: "")
+            }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 // MARK: - Competing Plans View
@@ -296,11 +551,17 @@ struct CompetingPlansView: View {
         }
     }
 
+    struct SectionSelection: Hashable {
+        let resultID: String
+        let sectionID: String
+    }
+
     @State private var manager = CompetingPlansManager()
     @State private var providerRegistry = ProviderRegistry()
     @State private var isLoadingProviders = false
     @State private var selectedResultID: String?
     @State private var selectedTabID: String?
+    @State private var selectedSection: SectionSelection?
     @State private var showCostDetails = false
     @State private var displayMode: DisplayMode = .tabs
 
@@ -319,11 +580,7 @@ struct CompetingPlansView: View {
                 tabBar
                 Divider()
             }
-            if showSynthesisPanel {
-                synthesisPanel
-            } else {
-                content
-            }
+            mainSurface
         }
         .task {
             await refreshProviders()
@@ -331,6 +588,11 @@ struct CompetingPlansView: View {
         .onChange(of: manager.results.count) { _, _ in
             if selectedTabID == nil, let first = manager.results.first {
                 selectedTabID = first.id
+            }
+            if let selection = selectedSection,
+               manager.results.contains(where: { $0.id == selection.resultID }) == false
+            {
+                selectedSection = nil
             }
         }
     }
@@ -506,17 +768,26 @@ struct CompetingPlansView: View {
             .tint(.purple)
         }
 
-        if canSynthesize || synthesisComplete {
+        if let currentSelection {
+            let isHighlighted = manager.isHighlighted(currentSelection.section, in: currentSelection.result)
             Button {
-                showSynthesisSheet = true
+                manager.toggleHighlight(for: currentSelection.result, section: currentSelection.section)
             } label: {
-                Label("Synthesize", systemImage: "wand.and.stars")
+                Label(
+                    isHighlighted ? "Remove Highlight" : "Highlight Section",
+                    systemImage: isHighlighted ? "highlighter.slash" : "highlighter"
+                )
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("h", modifiers: [.command])
+        }
+
+        if manager.hasHighlights {
+            Button("Clear Highlights") {
+                manager.clearHighlights()
             }
             .buttonStyle(.borderedProminent)
-            .tint(.purple)
-            .sheet(isPresented: $showSynthesisSheet) {
-                synthesisSheet
-            }
+            .tint(.yellow)
         }
 
         Button("Back to Editor") {
@@ -528,16 +799,33 @@ struct CompetingPlansView: View {
     // MARK: - Content
 
     @ViewBuilder
-    private var content: some View {
+    private var mainSurface: some View {
         if manager.results.isEmpty {
             emptyState
         } else {
-            switch displayMode {
-            case .tabs:
-                tabbedContent
-            case .sideBySide:
-                sideBySideContent
+            HSplitView {
+                Group {
+                    if showSynthesisPanel {
+                        synthesisPanel
+                    } else {
+                        content
+                    }
+                }
+                .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+
+                highlightsInspector
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, maxHeight: .infinity)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch displayMode {
+        case .tabs:
+            tabbedContent
+        case .sideBySide:
+            sideBySideContent
         }
     }
 
@@ -774,13 +1062,7 @@ struct CompetingPlansView: View {
             }
 
         case .completed(let text):
-            ScrollView {
-                Text(attributedMarkdown(text))
-                    .textSelection(.enabled)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
+            completedCardBody(result, text: text)
 
         case .failed(let message):
             VStack(spacing: 8) {
@@ -847,6 +1129,226 @@ struct CompetingPlansView: View {
         .padding(.vertical, 8)
     }
 
+    private func completedCardBody(
+        _ result: CompetingPlansManager.ProviderResult,
+        text: String
+    ) -> some View {
+        let sections = manager.sections(for: result)
+
+        return ScrollView {
+            if sections.isEmpty {
+                Text(attributedMarkdown(text))
+                    .textSelection(.enabled)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(sections) { section in
+                        sectionCard(result: result, section: section)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func sectionCard(
+        result: CompetingPlansManager.ProviderResult,
+        section: CompetingPlansManager.PlanSection
+    ) -> some View {
+        let isSelected = selectedSection == SectionSelection(resultID: result.id, sectionID: section.id)
+        let isHighlighted = manager.isHighlighted(section, in: result)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(section.title)
+                    .font(.headline)
+
+                Text("H\(section.level)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.secondary.opacity(0.08), in: Capsule())
+
+                if isHighlighted {
+                    Label("Highlighted", systemImage: "highlighter")
+                        .font(.caption)
+                        .foregroundStyle(cardAccentColor(for: result))
+                }
+
+                Spacer()
+
+                Button(isHighlighted ? "Unhighlight" : "Highlight") {
+                    manager.toggleHighlight(for: result, section: section)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if section.bodyMarkdown.isEmpty {
+                Text("This section only contains a heading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(attributedMarkdown(section.bodyMarkdown))
+                    .textSelection(.enabled)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(sectionBackground(isSelected: isSelected, isHighlighted: isHighlighted, result: result))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color(nsColor: .separatorColor).opacity(0.35),
+                    lineWidth: isSelected ? 2 : 1
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .onTapGesture {
+            selectedSection = SectionSelection(resultID: result.id, sectionID: section.id)
+            selectedTabID = result.id
+        }
+    }
+
+    private func sectionBackground(
+        isSelected: Bool,
+        isHighlighted: Bool,
+        result: CompetingPlansManager.ProviderResult
+    ) -> AnyShapeStyle {
+        if isHighlighted {
+            return AnyShapeStyle(cardAccentColor(for: result).opacity(isSelected ? 0.16 : 0.1))
+        }
+        if isSelected {
+            return AnyShapeStyle(Color.accentColor.opacity(0.08))
+        }
+        return AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var highlightsInspector: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "highlighter")
+                    .foregroundStyle(.yellow)
+                Text("Highlights")
+                    .font(.headline)
+                Spacer()
+                if manager.hasHighlights {
+                    Button("Clear All") {
+                        manager.clearHighlights()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(.bar)
+
+            Divider()
+
+            if manager.highlightGroups.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("No highlighted sections yet.")
+                        .font(.callout.weight(.medium))
+                    Text("Select a section card in a competing plan, then use the highlight button or `Cmd+H` to mark it for synthesis.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(manager.highlightGroups) { group in
+                            highlightGroupSection(group)
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func highlightGroupSection(_ group: CompetingPlansManager.HighlightGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: group.result.providerIcon)
+                    .foregroundStyle(cardAccentColor(for: group.result))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.result.providerName)
+                        .font(.subheadline.weight(.semibold))
+                    Text(group.result.modelName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Clear") {
+                    manager.clearHighlights(for: group.result.id)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            ForEach(group.highlights) { highlight in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(highlight.sectionTitle)
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button {
+                            manager.removeHighlight(id: highlight.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text(highlight.excerpt)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextField("Optional note", text: noteBinding(for: highlight))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                }
+                .padding(10)
+                .background(cardAccentColor(for: group.result).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func noteBinding(for highlight: CompetingPlansManager.SectionHighlight) -> Binding<String> {
+        Binding(
+            get: {
+                manager.highlights.first(where: { $0.id == highlight.id })?.note ?? ""
+            },
+            set: { note in
+                manager.updateHighlightNote(id: highlight.id, note: note)
+            }
+        )
+    }
+
+    private var currentSelection: (
+        result: CompetingPlansManager.ProviderResult,
+        section: CompetingPlansManager.PlanSection
+    )? {
+        guard let selectedSection,
+              let result = manager.results.first(where: { $0.id == selectedSection.resultID }),
+              let section = manager.sections(for: result).first(where: { $0.id == selectedSection.sectionID })
+        else {
+            return nil
+        }
+        return (result, section)
+    }
+
     // MARK: - Cost Breakdown Popover
 
     private var costBreakdown: some View {
@@ -883,6 +1385,8 @@ struct CompetingPlansView: View {
 
     private func startCompetingGeneration() {
         selectedTabID = nil
+        selectedSection = nil
+        showSynthesisPanel = false
 
         let prompt = PromptTemplates.substitute(
             template: PromptTemplates.planGenerationUser,
@@ -1104,7 +1608,7 @@ struct CompetingPlansView: View {
             variables: [
                 "plan_count": "\(completedPlans.count)",
                 "competing_plans": completedPlans.joined(separator: "\n\n---\n\n"),
-                "user_highlights": "",
+                "user_highlights": manager.synthesisHighlightsPrompt(),
             ]
         )
 

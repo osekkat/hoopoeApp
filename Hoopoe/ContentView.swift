@@ -278,7 +278,11 @@ struct ContentView: View {
                 MissingPlanRouteView(planId: planId, router: router)
             }
         case let .refinement(planId):
-            RefinementPlaceholderView(planId: planId, router: router)
+            if let plan = plan(for: planId) {
+                RefinementPanelView(plan: plan, versionManager: versionManager)
+            } else {
+                MissingPlanRouteView(planId: planId, router: router)
+            }
         case let .versionHistory(planId):
             if let plan = plan(for: planId) {
                 VersionListView(plan: plan, versionManager: versionManager, router: router)
@@ -744,40 +748,6 @@ struct OnboardingCardView: View {
     }
 }
 
-struct PlanWizardPlaceholderView: View {
-    let router: NavigationRouter
-
-    var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "plus.square.dashed",
-            title: "New Plan Wizard",
-            message: "This placeholder route demonstrates navigation into the creation flow."
-        ) {
-            Button("Continue to Plan Generation") {
-                router.navigate(to: .planGeneration)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
-struct PlanGenerationPlaceholderView: View {
-    let router: NavigationRouter
-
-    var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "wand.and.stars",
-            title: "Plan Generation",
-            message: "Generation will live on its own route rather than being hard-wired into the sidebar selection state."
-        ) {
-            Button("Open Generated Plan") {
-                router.navigate(to: .planEditor(planId: NavigationRouter.samplePlanID))
-            }
-            .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
 struct PlanEditorRouteView: View {
     let plan: PlanDocument
     let router: NavigationRouter
@@ -1134,60 +1104,6 @@ struct MissingPlanRouteView: View {
 
             Button("Return to Plans") {
                 router.navigate(to: .plansHome)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
-struct RefinementPlaceholderView: View {
-    let planId: UUID
-    let router: NavigationRouter
-
-    var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "arrow.triangle.2.circlepath",
-            title: "Refinement",
-            message: "This route is ready for the dedicated refinement workflow bead."
-        ) {
-            Button("Return to Plan Editor") {
-                router.navigate(to: .planEditor(planId: planId))
-            }
-            .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
-struct VersionHistoryPlaceholderView: View {
-    let planId: UUID
-    let router: NavigationRouter
-
-    var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "clock.arrow.circlepath",
-            title: "Version History",
-            message: "Version browsing now has its own route instead of being entangled with simple sidebar booleans."
-        ) {
-            Button("Return to Plan Editor") {
-                router.navigate(to: .planEditor(planId: planId))
-            }
-            .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
-struct MultiModelSynthesisPlaceholderView: View {
-    let planId: UUID
-    let router: NavigationRouter
-
-    var body: some View {
-        RoutePlaceholderCard(
-            systemImage: "square.on.square",
-            title: "Multi-Model Synthesis",
-            message: "This route reserves a clean entry point for the future comparison and synthesis workflow."
-        ) {
-            Button("Return to Plan Editor") {
-                router.navigate(to: .planEditor(planId: planId))
             }
             .buttonStyle(.borderedProminent)
         }

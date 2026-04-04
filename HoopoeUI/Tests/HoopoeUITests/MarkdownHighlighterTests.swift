@@ -125,12 +125,11 @@ final class MarkdownHighlighterTests: XCTestCase {
         var foundCodeBackground = false
         let codeStart = (text as NSString).range(of: "```\ncode").location
         if codeStart != NSNotFound {
-            result.enumerateAttribute(
-                .backgroundColor,
-                in: NSRange(location: codeStart, length: "```\ncode here\n```".utf16.count)
-            ) { value, _, _ in
-                if value != nil {
+            let codeRange = NSRange(location: codeStart, length: "```\ncode here\n```".utf16.count)
+            for offset in 0..<codeRange.length {
+                if result.attribute(.backgroundColor, at: codeRange.location + offset, effectiveRange: nil) != nil {
                     foundCodeBackground = true
+                    break
                 }
             }
             XCTAssertTrue(foundCodeBackground, "Code block after multibyte text should have background")

@@ -1,4 +1,5 @@
 import HoopoeUI
+import HoopoeUtils
 import SwiftUI
 
 // MARK: - Refinement State
@@ -52,9 +53,10 @@ final class RefinementState {
 struct RefinementPanelView: View {
     let plan: PlanDocument
     let versionManager: PlanVersionManager
-    let registry: ProviderRegistry
     var convergenceTracker: ConvergenceTracker = ConvergenceTracker()
 
+    @State private var registry = ProviderRegistry()
+    @State private var isLoadingProviders = false
     @State private var state = RefinementState()
     @State private var selectedProviderId: String?
     @State private var selectedModelId: String?
@@ -78,6 +80,9 @@ struct RefinementPanelView: View {
         }
         .onAppear {
             refinementRound = plan.versions.count
+        }
+        .task {
+            await refreshProviders()
             if selectedProviderId == nil, let first = registry.allModels.first {
                 selectedProviderId = first.provider.id
                 selectedModelId = first.model.id
@@ -384,6 +389,29 @@ struct RefinementPanelView: View {
                 selectedModelId = newValue.modelId
             }
         )
+    }
+
+    // MARK: - Provider Discovery
+
+    @MainActor
+    private func refreshProviders() async {
+        isLoadingProviders = true
+        defer { isLoadingProviders = false }
+
+        let keychain = KeychainService()
+        var discovered: [any LLMProvider] = []
+
+        if let key = try? await keychain.retrieve(provider: "anthropic") {
+            discovered.append(ClaudeProvider(apiKey: key))
+        }
+        if let key = try? await keychain.retrieve(provider: "openai") {
+            discovered.append(OpenAIProvider(apiKey: key))
+        }
+        if let key = try? await keychain.retrieve(provider: "google") {
+            discovered.append(GeminiProvider(apiKey: key))
+        }
+
+        registry.replaceProviders(with: discovered)
     }
 
     // MARK: - Helpers
