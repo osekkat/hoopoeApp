@@ -1173,6 +1173,7 @@ struct ProjectPickerView: View {
     let onOpen: (URL) -> Void
 
     @State private var isDropTargeted = false
+    @State private var showNewProjectSheet = false
 
     var body: some View {
         VStack(spacing: 32) {
@@ -1181,6 +1182,9 @@ struct ProjectPickerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $showNewProjectSheet) {
+            NewProjectSheet(onOpen: onOpen)
+        }
     }
 
     // MARK: - Drop Zone
@@ -1222,7 +1226,7 @@ struct ProjectPickerView: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                browseForNewProject()
+                showNewProjectSheet = true
             } label: {
                 Label("New Project", systemImage: "plus")
             }
@@ -1248,25 +1252,6 @@ struct ProjectPickerView: View {
         } else {
             showNotGitRepoAlert(url)
         }
-    }
-
-    private func browseForNewProject() {
-        let panel = NSOpenPanel()
-        panel.title = "New Project"
-        panel.message = "Select or create a folder for your new project"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        // Initialize git if needed
-        if !isGitRepo(url) {
-            initGitRepo(at: url)
-        }
-
-        onOpen(url)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -1320,6 +1305,266 @@ struct ProjectPickerView: View {
             initGitRepo(at: url)
             onOpen(url)
         }
+    }
+}
+
+// MARK: - New Project Sheet
+
+private struct NewProjectSheet: View {
+    let onOpen: (URL) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var cloneURL = ""
+    @State private var isCloning = false
+    @State private var cloneError: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            Text("New Project")
+                .font(.title3.weight(.semibold))
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+
+            Divider()
+
+            // Options
+            VStack(spacing: 0) {
+                // Create from scratch
+                optionRow(
+                    icon: "folder.badge.plus",
+                    title: "Create Empty Repository",
+                    subtitle: "Pick a folder and initialize a new git repo"
+                ) {
+                    createFromScratch()
+                }
+
+                Divider().padding(.horizontal, 20)
+
+                // Clone
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Clone Repository")
+                                .font(.body.weight(.medium))
+                            Text("Clone an existing git repository by URL")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 14)
+
+                    HStack(spacing: 8) {
+                        TextField("https://github.com/user/repo.git", text: $cloneURL)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isCloning)
+
+                        Button {
+                            cloneRepo()
+                        } label: {
+                            if isCloning {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 50)
+                            } else {
+                                Text("Clone")
+                                    .frame(width: 50)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(cloneURL.trimmingCharacters(in: .whitespaces).isEmpty || isCloning)
+                    }
+
+                    if let cloneError {
+                        Text(cloneError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 14)
+            }
+
+            Divider()
+
+            // Footer
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 460)
+    }
+
+    private func optionRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Actions
+
+    private func createFromScratch() {
+        let panel = NSOpenPanel()
+        panel.title = "New Project"
+        panel.message = "Select or create a folder for your new project"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if !isGitRepo(url) {
+            initGitRepo(at: url)
+        }
+
+        dismiss()
+        onOpen(url)
+    }
+
+    private func cloneRepo() {
+        let trimmed = cloneURL.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        // Pick destination
+        let panel = NSOpenPanel()
+        panel.title = "Clone Destination"
+        panel.message = "Choose where to clone the repository"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let parentDir = panel.url else { return }
+
+        isCloning = true
+        cloneError = nil
+
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["clone", trimmed]
+            process.currentDirectoryURL = parentDir
+
+            let errPipe = Pipe()
+            process.standardError = errPipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                let errOutput = String(data: errData, encoding: .utf8) ?? ""
+
+                await MainActor.run {
+                    isCloning = false
+
+                    if process.terminationStatus == 0 {
+                        // Derive repo folder name from URL
+                        let repoName = repoFolderName(from: trimmed)
+                        let clonedDir = parentDir.appendingPathComponent(repoName)
+
+                        if FileManager.default.fileExists(atPath: clonedDir.path) {
+                            dismiss()
+                            onOpen(clonedDir)
+                        } else {
+                            // Fallback: find the most recently created subdirectory
+                            if let found = newestSubdirectory(in: parentDir) {
+                                dismiss()
+                                onOpen(found)
+                            } else {
+                                cloneError = "Clone succeeded but could not locate the directory."
+                            }
+                        }
+                    } else {
+                        let firstLine = errOutput.components(separatedBy: "\n")
+                            .first(where: { !$0.isEmpty }) ?? "Unknown error"
+                        cloneError = firstLine
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isCloning = false
+                    cloneError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func repoFolderName(from urlString: String) -> String {
+        var name = URL(string: urlString)?.lastPathComponent ?? urlString
+        if name.hasSuffix(".git") {
+            name = String(name.dropLast(4))
+        }
+        return name.isEmpty ? "repo" : name
+    }
+
+    private func newestSubdirectory(in dir: URL) -> URL? {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        return contents
+            .filter { url in
+                var isDir: ObjCBool = false
+                return fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+            }
+            .sorted { a, b in
+                let aDate = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                let bDate = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                return aDate > bDate
+            }
+            .first
+    }
+
+    private func isGitRepo(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+    }
+
+    private func initGitRepo(at url: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["init"]
+        process.currentDirectoryURL = url
+        try? process.run()
+        process.waitUntilExit()
     }
 }
 
