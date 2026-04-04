@@ -508,15 +508,9 @@ struct PlanRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(plan.title)
-                    .font(.callout)
-                    .lineLimit(1)
-
-                Text(plan.updatedAt, style: .relative)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+            Text(plan.title)
+                .font(.callout)
+                .lineLimit(1)
 
             Spacer()
 

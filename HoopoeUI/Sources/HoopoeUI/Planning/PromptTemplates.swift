@@ -10,9 +10,7 @@ public enum PromptTemplates {
 
     /// System prompt establishing the Flywheel methodology context.
     public static let planGenerationSystem = """
-    You are an expert software architect generating a comprehensive project plan \
-    following the Agentic Coding Flywheel methodology. The Flywheel proves that \
-    85% of project value comes from exhaustive planning and work-item polishing.
+    You are an expert software architect generating a comprehensive project plan.
 
     Your plan must be thorough, specific, and actionable. Every section should \
     contain enough detail that a developer who has never seen the project can \
