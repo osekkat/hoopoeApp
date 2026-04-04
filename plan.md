@@ -299,30 +299,29 @@ Hoopoe.app
 
 ### Phase 0: App Launch & Project Selection
 
-#### 3.0.1 Welcome Screen
+#### 3.0.1 Project Picker
 
-The very first thing the user sees on launch (when no project is open) is the **Welcome Screen** (`WelcomeView.swift`). It contains two elements:
+The first thing the user sees on launch (when no project is open) is the **Project Picker** (`ProjectPickerView`). It contains two elements:
 
-1. **Open Project drop zone**: A large, prominent area with a folder icon, "Open Project" heading, and "Drag a folder with .git or click to browse" subtitle. The user can drag an existing project folder onto this zone or click it to open a standard macOS file picker filtered to directories. Hoopoe validates that the selected folder contains a `.git` directory; if not, it offers to initialize one.
+1. **Open Project drop zone**: A large area with a folder icon, "Open Project" heading, and "Drag a folder with .git or click to browse" subtitle. The user can drag an existing project folder onto this zone or click it to browse. Hoopoe validates that the selected folder contains a `.git` directory; if not, it offers to initialize one.
 
-2. **"+ New Project" button**: Below the drop zone. Tapping it presents the New Project sheet.
+2. **"New Project" button**: Below the drop zone. Tapping it presents the New Project sheet.
 
-The Welcome Screen reappears whenever the user closes their current project (i.e., Hoopoe always has either an open project or the Welcome Screen — never a blank state).
+The Project Picker reappears whenever the user closes their current project via Cmd+Shift+W.
 
 #### 3.0.2 New Project Sheet
 
-The New Project sheet (`NewProjectSheet.swift`) is a modal that collects the project setup:
+The New Project sheet (`NewProjectSheet`) is a modal that collects the project setup:
 
-- **Location**: A path picker defaulting to a sensible directory (e.g., `~/Projects`), with a browse button to change it.
+- **Location**: A path picker defaulting to `~/Projects`, with a browse button to change it.
 - **Project type** — two options presented as selectable cards:
-  1. **Empty**: Creates a new git repository from scratch. The user provides a repository name; Hoopoe creates the directory, runs `git init`, and opens the project.
-  2. **Clone**: Clones from a remote URL. The user provides the remote URL and an optional repository name; Hoopoe runs `git clone`, and opens the resulting project.
-- **Repository Name**: A text field for the folder/repo name (auto-populated from the clone URL when applicable).
-- **Create button**: Validates inputs, performs the git operation, and transitions to the main window with the project open.
+  1. **Empty**: Creates a new git repository from scratch. The user provides a project name via NSSavePanel; Hoopoe creates the directory and initializes a `.git/` directory structure using `FileManager` (sandbox-safe, no subprocess needed). A progress spinner with "Creating project..." text is shown during creation.
+  2. **Clone**: Clones from a remote URL. The user provides the remote URL; Hoopoe runs `git clone` via `/usr/bin/git`. The user's existing git credentials (SSH keys or macOS Keychain credential helper) are used automatically.
+- **Create/Clone button**: Validates inputs, performs the git operation, and transitions to the main window with the project open.
 
 #### 3.0.3 Transition to Main Window
 
-Once a project is opened (via drag-and-drop, file picker, or new project creation), Hoopoe transitions to the **Main Window** layout (Sidebar + Content Area + Inspector). The app detects the project state and routes to the appropriate phase: if no plan exists, it enters the Planning phase; if beads exist but no swarm has run, it enters the Beads phase; and so on.
+Once a project is opened (via drag-and-drop, file picker, or new project creation), Hoopoe transitions to the **Main Window** layout (Sidebar + Content Area + Inspector). If no plans exist, the center area shows the **Welcome Card** (`OnboardingCardView`) with "Configure API Keys" and "Create Your First Plan" buttons. Once plans exist, the welcome card is replaced by a "Select a plan from the sidebar" placeholder. The sidebar starts empty — no sample plans are auto-created.
 
 ---
 
@@ -336,19 +335,41 @@ Once a project is open, the user enters the Planning phase by either:
 2. **Creating a plan from scratch**: A guided wizard that implements the Flywheel planning methodology step by step.
 3. **Feature plans for brownfield projects**: Import or create `plan_feature1.md`, `plan_feature2.md` for adding features to existing codebases. The app detects the existing codebase structure and pre-populates context.
 
-#### 3.1.2 Guided Plan Creation Workflow
+#### 3.1.2 Plan Generation Mode Selection
 
-**Step 1 — Foundation Bundle**: The app prompts for: project name, tech stack (with AI-assisted suggestions), target platform, repository URL (if existing). It then auto-generates an initial AGENTS.md, pulls in relevant best-practice guides, and creates the project scaffolding.
+When the user clicks "Create Your First Plan" (from the welcome screen) or "New Plan" (from the sidebar), they first choose a generation mode:
 
-**Step 2 — Initial Plan Draft**: The user describes their vision in a free-form text area (stream-of-consciousness is encouraged, per the Flywheel methodology). Hoopoe sends this to the user's chosen "planning model" (defaulting to GPT 5.4 extra high, with Claude Opus and Gemini as alternatives) and displays the resulting plan in a split-pane editor: user's intent on the left, generated plan on the right.
+- **Guided** (icon: `questionmark.bubble`): AI asks clarifying questions one at a time to build context before generating the plan. Best for users who want a thorough, tailored plan.
+- **Quick** (icon: `sparkles`): User enters a project description and the AI generates a comprehensive plan immediately with no questions asked. Best for users who already know what they want.
 
-**Step 3 — Multi-Model Synthesis**: The app offers a "Get Competing Plans" button. This simultaneously sends the project description to 3-4 frontier models and displays the results in a tabbed comparison view. The user can highlight sections they like from each plan. Hoopoe then triggers the "Best-of-All-Worlds" synthesis prompt (from the Flywheel guide) automatically, using the user's highlights to weight the synthesis.
+#### 3.1.3 Guided Plan Creation Flow
 
-**Step 4 — Iterative Refinement**: A refinement panel shows the current plan alongside a "Refine" button. Each press starts a fresh conversation with a frontier model using the standard refinement prompt. A convergence meter (tracking output size delta, change velocity, and content similarity) shows when the plan has stabilized. The app recommends stopping after the meter reaches 0.75+.
+1. **Project Vision**: The user enters a brief description of what they want to build, and selects an AI model (Claude, GPT, or Gemini).
+2. **AI-Driven Q&A**: The AI asks one clarifying question at a time about tech stack, platform, architecture, deployment, constraints, etc. Each question is presented as **multiple-choice options** (3-5 clickable cards with letter badges A/B/C/...) plus an "Other..." option that reveals a free-text field. The user clicks an option and presses "Next."
+3. **Automatic Transition**: The AI decides when it has gathered enough context (typically 4-8 questions) by responding with `{"status": "ready"}`. The app automatically transitions to plan generation — no manual trigger needed.
+4. **Generation**: The accumulated Q&A context is appended to the project description and sent to the AI with the plan generation prompt template. The result streams in a split-pane view: user's vision + Q&A context on the left, the generated plan rendered in **markdown preview** (WKWebView) on the right.
+5. **Accept or Iterate**: The user can "Accept & Edit" (creates a `PlanDocument` and navigates to the plan editor), "Regenerate" (re-runs generation with the same context), or "Discard."
 
-**Step 5 — Structural Validation**: Before moving to beads, the plan linter (`plan_linter.rs`) validates the typed AST: all required semantic sections must be present (goals, constraints, architecture, failure modes, testing, observability, rollout, security, acceptance criteria), cross-references must resolve, and no section may be empty. Lint errors are surfaced inline in the editor even when the markdown is syntactically valid. The app also runs the "Lie to Them" adversarial technique — sending the plan to frontier models for exhaustive critique — and presents findings as an actionable checklist.
+#### 3.1.4 Quick Plan Creation Flow
 
-#### 3.1.3 Plan Editor Features
+1. **Project Vision**: The user enters a detailed project description in a free-form text area. Optional structured fields (project name, tech stack, platform, repository URL) can be expanded.
+2. **Model Selection**: Pick from configured providers (Claude, GPT, Gemini).
+3. **Generate**: Click "Generate Plan" — the AI produces a comprehensive plan in one shot, streamed in a split-pane view with markdown preview.
+4. **Accept or Iterate**: Same as guided mode.
+
+#### 3.1.5 Multi-Model Synthesis
+
+The app offers a "Get Competing Plans" button. This simultaneously sends the project description to 3-4 frontier models and displays the results in a tabbed comparison view. The user can highlight sections they like from each plan. Hoopoe then triggers the "Best-of-All-Worlds" synthesis prompt automatically, using the user's highlights to weight the synthesis.
+
+#### 3.1.6 Iterative Refinement
+
+A refinement panel shows the current plan alongside a "Refine" button. Each press starts a fresh conversation with a frontier model using the standard refinement prompt. A convergence meter (tracking output size delta, change velocity, and content similarity) shows when the plan has stabilized. The app recommends stopping after the meter reaches 0.75+.
+
+#### 3.1.7 Structural Validation
+
+Before moving to beads, the plan linter (`plan_linter.rs`) validates the typed AST: all required semantic sections must be present (goals, constraints, architecture, failure modes, testing, observability, rollout, security, acceptance criteria), cross-references must resolve, and no section may be empty. Lint errors are surfaced inline in the editor even when the markdown is syntactically valid. The app also runs the "Lie to Them" adversarial technique — sending the plan to frontier models for exhaustive critique — and presents findings as an actionable checklist.
+
+#### 3.1.8 Plan Editor Features
 
 The plan editor is markdown-first, but every save compiles the markdown into a typed Plan AST with stable section IDs (via `plan_schema.rs`). The editor provides: live preview, section folding, table of contents navigation, inline comments, version history (every refinement round is a version), diff view between versions, word/line count per section, a coverage heatmap showing which sections have been refined most, and **inline semantic lint errors** when required sections or acceptance criteria are missing — even if the markdown itself is syntactically valid. Section IDs are stable across edits, ensuring that traceability links to beads survive plan revisions.
 
@@ -955,20 +976,23 @@ Hoopoe uses a split concurrency architecture:
 ### Phase 0: App Shell & Project Onboarding
 
 - Xcode project setup, SwiftUI app shell, settings infrastructure
-- Welcome screen (`WelcomeView.swift`): Open Project drop zone (drag .git folder or browse) + "+ New Project" button
-- New Project sheet (`NewProjectSheet.swift`): Empty (git init) and Clone (git clone from URL) flows with location picker and repo name field
-- Automatic project state detection and phase routing on open
+- Project Picker (`ProjectPickerView`): Open Project drop zone (drag .git folder or browse) + "New Project" button
+- New Project sheet (`NewProjectSheet`): Empty (FileManager-based git init) and Clone (git clone from URL) flows with location picker
 - Main window layout (Sidebar + Content Area + Inspector)
-- Keychain integration for API key storage
+- Welcome card (`OnboardingCardView`) shown when no plans exist, with "Configure API Keys" and "Create Your First Plan" buttons
+- Keychain integration for API key storage (single Save button for all providers)
+- App Sandbox disabled (incompatible with CLI tool orchestration)
 
 ### Phase 1: Planning App (Swift-Only)
 
 - Plan editor in AppKit (markdown editing with NSTextView + TreeSitter, live preview, section folding, line numbers)
 - Direct API integration from Swift to frontier models (Claude, GPT, Gemini) for plan generation and refinement
+- **Two-mode plan generation**: Guided mode (AI asks multiple-choice questions one at a time, auto-transitions to generation when ready) and Quick mode (single-shot generation from project description)
 - Multi-model synthesis workflow: send project description to multiple models, tabbed comparison view, user-guided "Best-of-All-Worlds" synthesis
 - Iterative refinement with convergence tracking (output size delta, change velocity, content similarity)
-- Plan import/export (drag-and-drop `.md` files) and guided plan creation wizard
+- Plan import/export (drag-and-drop `.md` files)
 - Plan version history: every refinement round saved, diff view between versions
+- Generated plans rendered in markdown preview (WKWebView) before acceptance
 
 ### Phase 2: Plan Intelligence
 
