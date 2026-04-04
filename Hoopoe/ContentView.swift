@@ -1314,145 +1314,256 @@ private struct NewProjectSheet: View {
     let onOpen: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
 
+    enum Mode: String, CaseIterable {
+        case empty, clone, template
+
+        var icon: String {
+            switch self {
+            case .empty: "plus.rectangle.on.folder"
+            case .clone: "arrow.triangle.branch"
+            case .template: "rectangle.3.group"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .empty: "Empty"
+            case .clone: "Clone"
+            case .template: "Template"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .empty: "New git repository from\nscratch"
+            case .clone: "Clone from a remote\nURL"
+            case .template: "Start from a project\ntemplate"
+            }
+        }
+
+        var actionLabel: String {
+            switch self {
+            case .empty: "Create"
+            case .clone: "Clone"
+            case .template: "Create"
+            }
+        }
+    }
+
+    @State private var mode: Mode = .clone
+    @State private var location: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Projects", isDirectory: true)
     @State private var cloneURL = ""
     @State private var isCloning = false
     @State private var cloneError: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
+        VStack(alignment: .leading, spacing: 20) {
+            // Title
             Text("New Project")
-                .font(.title3.weight(.semibold))
-                .padding(.top, 20)
-                .padding(.bottom, 16)
+                .font(.title2.weight(.bold))
 
-            Divider()
+            // Location
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Location")
+                    .font(.subheadline.weight(.medium))
 
-            // Options
-            VStack(spacing: 0) {
-                // Create from scratch
-                optionRow(
-                    icon: "folder.badge.plus",
-                    title: "Create Empty Repository",
-                    subtitle: "Pick a folder and initialize a new git repo"
-                ) {
-                    createFromScratch()
+                HStack(spacing: 8) {
+                    Text(location.path)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.background)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(Color.secondary.opacity(0.25))
+                                )
+                        )
+
+                    Button {
+                        browseLocation()
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.body)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(width: 36, height: 36)
                 }
-
-                Divider().padding(.horizontal, 20)
-
-                // Clone
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Clone Repository")
-                                .font(.body.weight(.medium))
-                            Text("Clone an existing git repository by URL")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 14)
-
-                    HStack(spacing: 8) {
-                        TextField("https://github.com/user/repo.git", text: $cloneURL)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(isCloning)
-
-                        Button {
-                            cloneRepo()
-                        } label: {
-                            if isCloning {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 50)
-                            } else {
-                                Text("Clone")
-                                    .frame(width: 50)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(cloneURL.trimmingCharacters(in: .whitespaces).isEmpty || isCloning)
-                    }
-
-                    if let cloneError {
-                        Text(cloneError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
             }
+
+            // Mode cards
+            HStack(spacing: 12) {
+                ForEach(Mode.allCases, id: \.self) { m in
+                    modeCard(m)
+                }
+            }
+
+            // Contextual input
+            contextualSection
 
             Divider()
 
             // Footer
             HStack {
-                Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-            }
-            .padding(16)
-        }
-        .frame(width: 460)
-    }
-
-    private func optionRow(
-        icon: String,
-        title: String,
-        subtitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body.weight(.medium))
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if isCloning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 8)
+                }
+
+                Button(mode.actionLabel) {
+                    performAction()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canPerformAction)
+                .keyboardShortcut(.defaultAction)
             }
+        }
+        .padding(24)
+        .frame(width: 560)
+    }
+
+    // MARK: - Mode Card
+
+    private func modeCard(_ m: Mode) -> some View {
+        let selected = mode == m
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { mode = m }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: m.icon)
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(selected ? .primary : .secondary)
+
+                Text(m.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Text(m.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(selected ? Color.secondary.opacity(0.12) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(
+                                selected ? Color.secondary.opacity(0.6) : Color.secondary.opacity(0.2),
+                                lineWidth: selected ? 1.5 : 1
+                            )
+                    )
+            )
             .contentShape(Rectangle())
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
     }
 
+    // MARK: - Contextual Section
+
+    @ViewBuilder
+    private var contextualSection: some View {
+        switch mode {
+        case .empty:
+            EmptyView()
+
+        case .clone:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Repository URL")
+                    .font(.subheadline.weight(.medium))
+
+                TextField("https:// or git@github.com:user/repo.git", text: $cloneURL)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(isCloning)
+
+                if let cloneError {
+                    Text(cloneError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+        case .template:
+            VStack(spacing: 8) {
+                Image(systemName: "hammer")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text("Templates coming soon")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+    }
+
+    // MARK: - State
+
+    private var canPerformAction: Bool {
+        switch mode {
+        case .empty:
+            true
+        case .clone:
+            !cloneURL.trimmingCharacters(in: .whitespaces).isEmpty && !isCloning
+        case .template:
+            false
+        }
+    }
+
     // MARK: - Actions
 
-    private func createFromScratch() {
+    private func browseLocation() {
         let panel = NSOpenPanel()
-        panel.title = "New Project"
-        panel.message = "Select or create a folder for your new project"
+        panel.title = "Choose Location"
+        panel.message = "Select the parent folder for your project"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
+        panel.directoryURL = location
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        location = url
+    }
+
+    private func performAction() {
+        switch mode {
+        case .empty:
+            createEmpty()
+        case .clone:
+            cloneRepo()
+        case .template:
+            break
+        }
+    }
+
+    private func createEmpty() {
+        let panel = NSSavePanel()
+        panel.title = "New Project"
+        panel.message = "Enter a name for your project folder"
+        panel.directoryURL = location
+        panel.nameFieldLabel = "Project Name:"
+        panel.nameFieldStringValue = "MyProject"
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        if !isGitRepo(url) {
-            initGitRepo(at: url)
-        }
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        initGitRepo(at: url)
 
         dismiss()
         onOpen(url)
@@ -1462,16 +1573,8 @@ private struct NewProjectSheet: View {
         let trimmed = cloneURL.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
-        // Pick destination
-        let panel = NSOpenPanel()
-        panel.title = "Clone Destination"
-        panel.message = "Choose where to clone the repository"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-
-        guard panel.runModal() == .OK, let parentDir = panel.url else { return }
+        let parentDir = location
+        try? FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
 
         isCloning = true
         cloneError = nil
@@ -1496,26 +1599,21 @@ private struct NewProjectSheet: View {
                     isCloning = false
 
                     if process.terminationStatus == 0 {
-                        // Derive repo folder name from URL
                         let repoName = repoFolderName(from: trimmed)
                         let clonedDir = parentDir.appendingPathComponent(repoName)
 
                         if FileManager.default.fileExists(atPath: clonedDir.path) {
                             dismiss()
                             onOpen(clonedDir)
+                        } else if let found = newestSubdirectory(in: parentDir) {
+                            dismiss()
+                            onOpen(found)
                         } else {
-                            // Fallback: find the most recently created subdirectory
-                            if let found = newestSubdirectory(in: parentDir) {
-                                dismiss()
-                                onOpen(found)
-                            } else {
-                                cloneError = "Clone succeeded but could not locate the directory."
-                            }
+                            cloneError = "Clone succeeded but could not locate the directory."
                         }
                     } else {
-                        let firstLine = errOutput.components(separatedBy: "\n")
-                            .first(where: { !$0.isEmpty }) ?? "Unknown error"
-                        cloneError = firstLine
+                        cloneError = errOutput.components(separatedBy: "\n")
+                            .first { !$0.isEmpty } ?? "Unknown error"
                     }
                 }
             } catch {
@@ -1527,24 +1625,23 @@ private struct NewProjectSheet: View {
         }
     }
 
+    // MARK: - Helpers
+
     private func repoFolderName(from urlString: String) -> String {
         var name = URL(string: urlString)?.lastPathComponent ?? urlString
-        if name.hasSuffix(".git") {
-            name = String(name.dropLast(4))
-        }
+        if name.hasSuffix(".git") { name = String(name.dropLast(4)) }
         return name.isEmpty ? "repo" : name
     }
 
     private func newestSubdirectory(in dir: URL) -> URL? {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
+        guard let contents = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles]
         ) else { return nil }
 
         return contents
             .filter { url in
                 var isDir: ObjCBool = false
-                return fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+                return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
             }
             .sorted { a, b in
                 let aDate = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
@@ -1552,10 +1649,6 @@ private struct NewProjectSheet: View {
                 return aDate > bDate
             }
             .first
-    }
-
-    private func isGitRepo(_ url: URL) -> Bool {
-        FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
     }
 
     private func initGitRepo(at url: URL) {
