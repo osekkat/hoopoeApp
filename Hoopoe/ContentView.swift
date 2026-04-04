@@ -1478,13 +1478,8 @@ private struct NewProjectSheet: View {
 
     // MARK: - Contextual Section
 
-    @ViewBuilder
     private var contextualSection: some View {
-        switch mode {
-        case .empty:
-            EmptyView()
-
-        case .clone:
+        ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Repository URL")
                     .font(.subheadline.weight(.medium))
@@ -1499,8 +1494,9 @@ private struct NewProjectSheet: View {
                         .foregroundStyle(.red)
                 }
             }
+            .opacity(mode == .clone ? 1 : 0)
+            .allowsHitTesting(mode == .clone)
 
-        case .template:
             VStack(spacing: 8) {
                 Image(systemName: "hammer")
                     .font(.title3)
@@ -1511,6 +1507,8 @@ private struct NewProjectSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
+            .opacity(mode == .template ? 1 : 0)
+            .allowsHitTesting(mode == .template)
         }
     }
 
