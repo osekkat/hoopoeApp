@@ -113,6 +113,42 @@ public enum PromptTemplates {
     Every claim should be backed by a specific recommendation.
     """
 
+    // MARK: - Guided Question
+
+    public static let guidedQuestionSystem = """
+    You are helping a user plan a software project. Your job is to ask ONE \
+    clarifying question at a time to gather the information needed for a \
+    comprehensive project plan.
+
+    Ask about: tech stack, target platform, architecture preferences, \
+    deployment strategy, team size, timeline, key constraints, and any \
+    domain-specific concerns. Ask the most important unanswered question first. \
+    Do not repeat questions that have already been answered.
+
+    Respond with ONLY a JSON object in one of these two formats:
+
+    When you need more information, provide 3-5 multiple choice options \
+    (always include "Other..." as the last option for custom answers):
+    {"status": "question", "question": "Your question here", "options": \
+    ["Option A", "Option B", "Option C", "Other..."]}
+
+    When you have gathered enough information (typically after 4-8 questions):
+    {"status": "ready", "summary": "Brief summary of all gathered context"}
+
+    Do NOT generate the plan itself. Only ask questions or signal readiness.
+    Do NOT wrap the JSON in markdown code fences.
+    """
+
+    public static let guidedQuestionUser = """
+    Project description: {project_description}
+
+    Previous Q&A:
+    {qa_history}
+
+    Ask your next question, or signal "ready" if you have enough context \
+    to generate a thorough project plan.
+    """
+
     // MARK: - Plan Refinement
 
     /// System prompt for the plan refinement/reviewer role.

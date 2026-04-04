@@ -28,6 +28,19 @@ private struct GenerationModelOption: Identifiable, Hashable {
     }
 }
 
+// MARK: - Generation Mode
+
+private enum GenerationMode {
+    case guided
+    case quick
+}
+
+private struct GuidedQuestion {
+    let question: String
+    let options: [String]
+    var answer: String
+}
+
 // MARK: - Generation Flow State
 
 @Observable
@@ -52,6 +65,11 @@ final class GenerationFlowState {
     var frozenProviderID = ""
 
     private var streamTask: Task<Void, Never>?
+
+    var isInputPhase: Bool {
+        if case .input = phase { return true }
+        return false
+    }
 
     var isGenerating: Bool {
         if case .generating = phase { return true }
@@ -106,13 +124,32 @@ struct PlanGenerationView: View {
     @State private var targetPlatform = ""
     @State private var repositoryURL = ""
 
+    // Mode selection and guided Q&A
+    @State private var mode: GenerationMode?
+    @State private var guidedQuestions: [GuidedQuestion] = []
+    @State private var currentQuestion: String?
+    @State private var currentOptions: [String] = []
+    @State private var selectedOptionIndex: Int?
+    @State private var customAnswer = ""
+    @State private var isAskingQuestion = false
+    @State private var guidedComplete = false
+    @State private var guidedError: String?
+
     var body: some View {
         Group {
-            switch flowState.phase {
-            case .input:
-                inputView
-            case .generating, .complete, .failed:
-                splitPaneView
+            if mode == nil {
+                modeSelectionView
+            } else if mode == .guided && !guidedComplete {
+                guidedQuestionView
+            } else if mode == .guided && guidedComplete && flowState.isInputPhase {
+                guidedGeneratingTransition
+            } else {
+                switch flowState.phase {
+                case .input:
+                    inputView
+                case .generating, .complete, .failed:
+                    splitPaneView
+                }
             }
         }
         .task {
@@ -120,7 +157,362 @@ struct PlanGenerationView: View {
         }
     }
 
-    // MARK: - Input View
+    // MARK: - Guided Generating Transition
+
+    private var guidedGeneratingTransition: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Generating your plan...")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            guard let selectedModel,
+                  let provider = providerRegistry.provider(for: selectedModel.providerID)
+            else { return }
+            startGuidedGeneration(provider: provider, model: selectedModel)
+        }
+    }
+
+    // MARK: - Mode Selection View
+
+    private var modeSelectionView: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Generate a Plan")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Text("Choose how you want to create your project plan.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            VStack(spacing: 24) {
+                Spacer()
+
+                HStack(spacing: 20) {
+                    modeCard(
+                        icon: "questionmark.bubble",
+                        title: "Guided",
+                        subtitle: "AI asks questions to\nbuild the best plan",
+                        action: { mode = .guided }
+                    )
+                    modeCard(
+                        icon: "sparkles",
+                        title: "Quick",
+                        subtitle: "Generate a comprehensive\nplan immediately",
+                        action: { mode = .quick }
+                    )
+                }
+                .padding(.horizontal, 40)
+
+                Spacer()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func modeCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundStyle(.tint)
+
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+            .padding(.horizontal, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.background)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Guided Question View
+
+    private var guidedQuestionView: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Guided Plan Creation")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
+                    if !guidedQuestions.isEmpty {
+                        Text("Question \(guidedQuestions.count + (currentQuestion != nil ? 1 : 0))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+
+                Text("Answer the questions below so the AI can build a thorough plan for your project.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            if currentQuestion == nil && !isAskingQuestion && guidedQuestions.isEmpty {
+                guidedDescriptionInput
+            } else {
+                guidedQuestionContent
+            }
+
+            Divider()
+
+            guidedFooter
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var guidedDescriptionInput: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Project Vision")
+                        .font(.headline)
+
+                    TextEditor(text: $projectDescription)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(12)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                        )
+                        .frame(minHeight: 200, idealHeight: 280)
+                        .overlay(alignment: .topLeading) {
+                            if projectDescription.isEmpty {
+                                Text("Briefly describe what you want to build. The AI will ask follow-up questions to fill in the details.")
+                                    .font(.body)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(16)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                }
+
+                modelSelectionSection
+            }
+            .padding(20)
+        }
+    }
+
+    private var guidedQuestionContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if !guidedQuestions.isEmpty {
+                    ForEach(Array(guidedQuestions.enumerated()), id: \.offset) { index, qa in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Q\(index + 1): \(qa.question)")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+
+                            Text(qa.answer)
+                                .font(.callout)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.accentColor.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+
+                    Divider()
+                        .padding(.vertical, 4)
+                }
+
+                if isAskingQuestion {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Thinking of the next question...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if currentQuestion == nil && !guidedQuestions.isEmpty {
+                    VStack(spacing: 12) {
+                        Text("Ready to generate your plan based on the answers above.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            guard let selectedModel,
+                                  let provider = providerRegistry.provider(for: selectedModel.providerID)
+                            else { return }
+                            askNextQuestion(provider: provider, model: selectedModel)
+                        } label: {
+                            Label("Continue", systemImage: "arrow.right")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let question = currentQuestion {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(question)
+                            .font(.body.weight(.medium))
+
+                        VStack(spacing: 8) {
+                            ForEach(Array(currentOptions.enumerated()), id: \.offset) { index, option in
+                                let isOther = option.lowercased().hasPrefix("other")
+                                let isSelected = selectedOptionIndex == index
+
+                                Button {
+                                    selectedOptionIndex = index
+                                    if !isOther {
+                                        customAnswer = ""
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(optionLetter(index))
+                                            .font(.system(.callout, design: .rounded).weight(.semibold))
+                                            .foregroundStyle(isSelected ? .white : .secondary)
+                                            .frame(width: 24, height: 24)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
+                                            )
+
+                                        Text(option)
+                                            .font(.callout)
+                                            .foregroundStyle(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(isSelected ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .strokeBorder(
+                                                        isSelected ? Color.accentColor.opacity(0.5) : Color(nsColor: .separatorColor),
+                                                        lineWidth: isSelected ? 1.5 : 1
+                                                    )
+                                            )
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                if isOther && isSelected {
+                                    TextField("Type your answer...", text: $customAnswer)
+                                        .textFieldStyle(.roundedBorder)
+                                        .padding(.leading, 36)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let error = guidedError {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    private func optionLetter(_ index: Int) -> String {
+        let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        guard index < letters.count else { return "\(index + 1)" }
+        return String(letters[letters.index(letters.startIndex, offsetBy: index)])
+    }
+
+    private var currentResolvedAnswer: String? {
+        guard let index = selectedOptionIndex, index < currentOptions.count else { return nil }
+        let option = currentOptions[index]
+        if option.lowercased().hasPrefix("other") {
+            let trimmed = customAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return option
+    }
+
+    private var guidedFooter: some View {
+        HStack {
+            Button("Back") {
+                if currentQuestion != nil {
+                    currentQuestion = nil
+                    currentOptions = []
+                    selectedOptionIndex = nil
+                    customAnswer = ""
+                    guidedError = nil
+                } else {
+                    mode = nil
+                    guidedQuestions = []
+                }
+            }
+            .disabled(isAskingQuestion)
+
+            Spacer()
+
+            if currentQuestion != nil {
+                Button(action: submitAnswerAndAskNext) {
+                    Label("Next", systemImage: "arrow.right")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(currentResolvedAnswer == nil || isAskingQuestion)
+            } else if guidedQuestions.isEmpty {
+                Button(action: startGuidedFlow) {
+                    Label("Start", systemImage: "arrow.right")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(
+                    projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !hasConfiguredProviders
+                    || isLoadingProviders
+                    || isAskingQuestion
+                )
+            }
+        }
+    }
+
+    // MARK: - Input View (Quick Mode)
 
     private var inputView: some View {
         VStack(spacing: 0) {
@@ -444,13 +836,10 @@ struct PlanGenerationView: View {
                 }
 
             case .complete(let text):
-                ScrollView {
-                    Text(attributedMarkdown(text))
-                        .textSelection(.enabled)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                }
+                MarkdownPreviewRepresentable(
+                    markdown: text,
+                    scrollFraction: 0
+                )
 
             case .failed(let message):
                 VStack(spacing: 12) {
@@ -546,6 +935,188 @@ struct PlanGenerationView: View {
         else { return }
 
         startGeneration(provider: provider, model: selectedModel)
+    }
+
+    private func startGuidedFlow() {
+        guard let selectedModel,
+              let provider = providerRegistry.provider(for: selectedModel.providerID)
+        else { return }
+
+        askNextQuestion(provider: provider, model: selectedModel)
+    }
+
+    private func submitAnswerAndAskNext() {
+        guard let question = currentQuestion,
+              let answer = currentResolvedAnswer,
+              let selectedModel,
+              let provider = providerRegistry.provider(for: selectedModel.providerID)
+        else { return }
+
+        guidedQuestions.append(GuidedQuestion(question: question, options: currentOptions, answer: answer))
+        currentQuestion = nil
+        currentOptions = []
+        selectedOptionIndex = nil
+        customAnswer = ""
+
+        askNextQuestion(provider: provider, model: selectedModel)
+    }
+
+    private func askNextQuestion(provider: any LLMProvider, model: GenerationModelOption) {
+        isAskingQuestion = true
+        guidedError = nil
+
+        let qaHistory = guidedQuestions.map { "Q: \($0.question)\nA: \($0.answer)" }.joined(separator: "\n\n")
+
+        let prompt = PromptTemplates.substitute(
+            template: PromptTemplates.guidedQuestionUser,
+            variables: [
+                "project_description": projectDescription,
+                "qa_history": qaHistory.isEmpty ? "(none yet)" : qaHistory,
+            ]
+        )
+
+        let stream = provider.send(
+            prompt: prompt,
+            model: model.modelID,
+            system: PromptTemplates.guidedQuestionSystem,
+            stream: false
+        )
+
+        Task { @MainActor in
+            var accumulated = ""
+            do {
+                for try await event in stream {
+                    switch event {
+                    case .text(let chunk):
+                        accumulated += chunk
+                    case .done(let response):
+                        accumulated = response.fullText
+                    case .error(let error):
+                        guidedError = error.localizedDescription
+                        isAskingQuestion = false
+                        return
+                    }
+                }
+
+                let parsed = parseGuidedResponse(accumulated)
+                switch parsed {
+                case .question(let q, let opts):
+                    currentQuestion = q
+                    currentOptions = opts.isEmpty ? ["Other..."] : opts
+                    selectedOptionIndex = nil
+                    customAnswer = ""
+                case .ready:
+                    guidedComplete = true
+                case .parseError(let raw):
+                    currentQuestion = raw
+                    currentOptions = ["Other..."]
+                    selectedOptionIndex = nil
+                    customAnswer = ""
+                }
+            } catch {
+                guidedError = error.localizedDescription
+            }
+            isAskingQuestion = false
+        }
+    }
+
+    private enum GuidedParseResult {
+        case question(String, [String])
+        case ready
+        case parseError(String)
+    }
+
+    private func parseGuidedResponse(_ text: String) -> GuidedParseResult {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = cleaned.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = json["status"] as? String
+        else {
+            return .parseError(cleaned)
+        }
+
+        if status == "ready" {
+            return .ready
+        } else if status == "question", let question = json["question"] as? String {
+            let options = (json["options"] as? [String]) ?? []
+            return .question(question, options)
+        }
+
+        return .parseError(cleaned)
+    }
+
+    private func startGuidedGeneration(provider: any LLMProvider, model: GenerationModelOption) {
+        let qaContext = guidedQuestions.map { "Q: \($0.question)\nA: \($0.answer)" }.joined(separator: "\n\n")
+        let enrichedDescription = """
+        \(projectDescription)
+
+        ---
+        Additional context gathered through guided questions:
+
+        \(qaContext)
+        """
+
+        flowState.cancel()
+        flowState.streamingText = ""
+        flowState.tokenUsage = nil
+        flowState.costEstimate = nil
+        flowState.frozenDescription = enrichedDescription
+        flowState.frozenModelName = model.modelDisplayName
+        flowState.frozenModelID = model.modelID
+        flowState.frozenProviderID = model.providerID
+
+        let prompt = PromptTemplates.substitute(
+            template: PromptTemplates.planGenerationUser,
+            variables: [
+                "project_name": sanitized(projectName, fallback: "Untitled Project"),
+                "platform": sanitized(targetPlatform, fallback: "Unspecified"),
+                "tech_stack": sanitized(techStack, fallback: "Unspecified"),
+                "project_description": sanitized(enrichedDescription, fallback: "No description provided."),
+            ]
+        )
+
+        let stream = provider.send(
+            prompt: prompt,
+            model: model.modelID,
+            system: PromptTemplates.planGenerationSystem,
+            stream: true
+        )
+
+        flowState.phase = .generating
+
+        let task = Task { @MainActor in
+            do {
+                for try await event in stream {
+                    switch event {
+                    case .text(let chunk):
+                        flowState.streamingText += chunk
+                    case .done(let response):
+                        flowState.tokenUsage = response.tokenUsage
+                        flowState.costEstimate = response.costEstimate
+                        flowState.phase = .complete(text: response.fullText)
+                        return
+                    case .error(let error):
+                        flowState.phase = .failed(error.localizedDescription)
+                        return
+                    }
+                }
+                if case .generating = flowState.phase {
+                    flowState.phase = .complete(text: flowState.streamingText)
+                }
+            } catch is CancellationError {
+                if case .generating = flowState.phase {
+                    flowState.phase = .input
+                }
+            } catch {
+                flowState.phase = .failed(error.localizedDescription)
+            }
+        }
+        flowState.setStreamTask(task)
     }
 
     private func startGeneration(provider: any LLMProvider, model: GenerationModelOption) {
