@@ -1598,7 +1598,7 @@ private struct NewProjectSheet: View {
 
 /// Sandbox-safe git repo initialization using FileManager instead of /usr/bin/git (which is
 /// an xcrun shim that refuses to run inside an App Sandbox).
-private func initGitRepoWithFileManager(at url: URL) {
+func initGitRepoWithFileManager(at url: URL) {
     let fm = FileManager.default
     let git = url.appendingPathComponent(".git", isDirectory: true)
 

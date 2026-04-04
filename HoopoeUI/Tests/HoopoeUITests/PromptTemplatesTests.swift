@@ -76,10 +76,10 @@ final class PromptTemplatesTests: XCTestCase {
         XCTAssertTrue(template.contains("{platform}"))
     }
 
-    func testGenerationSystemPromptMentionsFlywheel() {
+    func testGenerationSystemPromptEstablishesArchitectRole() {
         XCTAssertTrue(
-            PromptTemplates.planGenerationSystem.lowercased().contains("flywheel"),
-            "System prompt should reference the Flywheel methodology"
+            PromptTemplates.planGenerationSystem.lowercased().contains("software architect"),
+            "System prompt should establish the architect role"
         )
     }
 
@@ -128,6 +128,57 @@ final class PromptTemplatesTests: XCTestCase {
         XCTAssertTrue(
             system.contains("review") || system.contains("refin"),
             "System prompt should establish reviewer/refiner role"
+        )
+    }
+
+    // MARK: - Guided Question Templates
+
+    func testGuidedQuestionSystemPromptRequestsJSON() {
+        let system = PromptTemplates.guidedQuestionSystem
+        XCTAssertTrue(system.contains("JSON"), "Guided system prompt should mention JSON format")
+        XCTAssertTrue(system.contains("\"status\""), "Guided system prompt should show status field")
+        XCTAssertTrue(system.contains("\"question\""), "Guided system prompt should show question field")
+        XCTAssertTrue(system.contains("\"ready\""), "Guided system prompt should show ready status")
+        XCTAssertTrue(system.contains("\"options\""), "Guided system prompt should show options field")
+    }
+
+    func testGuidedQuestionSystemPromptRequestsMultipleChoice() {
+        let system = PromptTemplates.guidedQuestionSystem
+        XCTAssertTrue(
+            system.contains("Other..."),
+            "Guided system prompt should instruct AI to include 'Other...' option"
+        )
+        XCTAssertTrue(
+            system.lowercased().contains("multiple choice") || system.contains("3-5"),
+            "Guided system prompt should request multiple choice options"
+        )
+    }
+
+    func testGuidedQuestionUserTemplateContainsPlaceholders() {
+        let template = PromptTemplates.guidedQuestionUser
+        XCTAssertTrue(template.contains("{project_description}"))
+        XCTAssertTrue(template.contains("{qa_history}"))
+    }
+
+    func testGuidedQuestionUserTemplateSubstitution() {
+        let result = PromptTemplates.substitute(
+            template: PromptTemplates.guidedQuestionUser,
+            variables: [
+                "project_description": "A weather tracking app",
+                "qa_history": "Q: What platform?\nA: Web",
+            ]
+        )
+        XCTAssertTrue(result.contains("A weather tracking app"))
+        XCTAssertTrue(result.contains("Q: What platform?"))
+        XCTAssertFalse(result.contains("{project_description}"))
+        XCTAssertFalse(result.contains("{qa_history}"))
+    }
+
+    func testGuidedQuestionSystemPromptPreventsPlanGeneration() {
+        let system = PromptTemplates.guidedQuestionSystem.lowercased()
+        XCTAssertTrue(
+            system.contains("do not generate the plan"),
+            "Guided system prompt should prevent the AI from generating the plan"
         )
     }
 

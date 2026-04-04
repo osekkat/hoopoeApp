@@ -1020,34 +1020,8 @@ struct PlanGenerationView: View {
         }
     }
 
-    private enum GuidedParseResult {
-        case question(String, [String])
-        case ready
-        case parseError(String)
-    }
-
-    private func parseGuidedResponse(_ text: String) -> GuidedParseResult {
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let data = cleaned.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let status = json["status"] as? String
-        else {
-            return .parseError(cleaned)
-        }
-
-        if status == "ready" {
-            return .ready
-        } else if status == "question", let question = json["question"] as? String {
-            let options = (json["options"] as? [String]) ?? []
-            return .question(question, options)
-        }
-
-        return .parseError(cleaned)
+    private func parseGuidedResponse(_ text: String) -> GuidedResponseParser.Result {
+        GuidedResponseParser.parse(text)
     }
 
     private func startGuidedGeneration(provider: any LLMProvider, model: GenerationModelOption) {
@@ -1284,6 +1258,40 @@ private struct LabeledField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.roundedBorder)
         }
+    }
+}
+
+// MARK: - Guided Response Parser
+
+enum GuidedResponseParser {
+    enum Result {
+        case question(String, [String])
+        case ready
+        case parseError(String)
+    }
+
+    static func parse(_ text: String) -> Result {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = cleaned.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = json["status"] as? String
+        else {
+            return .parseError(cleaned)
+        }
+
+        if status == "ready" {
+            return .ready
+        } else if status == "question", let question = json["question"] as? String {
+            let options = (json["options"] as? [String]) ?? []
+            return .question(question, options)
+        }
+
+        return .parseError(cleaned)
     }
 }
 
