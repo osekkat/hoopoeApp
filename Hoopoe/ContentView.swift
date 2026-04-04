@@ -1311,13 +1311,12 @@ private struct NewProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Mode: String, CaseIterable {
-        case empty, clone, template
+        case empty, clone
 
         var icon: String {
             switch self {
             case .empty: "plus.rectangle.on.folder"
             case .clone: "arrow.triangle.branch"
-            case .template: "rectangle.3.group"
             }
         }
 
@@ -1325,7 +1324,6 @@ private struct NewProjectSheet: View {
             switch self {
             case .empty: "Empty"
             case .clone: "Clone"
-            case .template: "Template"
             }
         }
 
@@ -1333,7 +1331,6 @@ private struct NewProjectSheet: View {
             switch self {
             case .empty: "New git repository from\nscratch"
             case .clone: "Clone from a remote\nURL"
-            case .template: "Start from a project\ntemplate"
             }
         }
 
@@ -1341,7 +1338,6 @@ private struct NewProjectSheet: View {
             switch self {
             case .empty: "Create"
             case .clone: "Clone"
-            case .template: "Create"
             }
         }
     }
@@ -1474,37 +1470,22 @@ private struct NewProjectSheet: View {
     // MARK: - Contextual Section
 
     private var contextualSection: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Repository URL")
-                    .font(.subheadline.weight(.medium))
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Repository URL")
+                .font(.subheadline.weight(.medium))
 
-                TextField("https:// or git@github.com:user/repo.git", text: $cloneURL)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(isCloning)
+            TextField("https:// or git@github.com:user/repo.git", text: $cloneURL)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isCloning)
 
-                if let cloneError {
-                    Text(cloneError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
+            if let cloneError {
+                Text(cloneError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
-            .opacity(mode == .clone ? 1 : 0)
-            .allowsHitTesting(mode == .clone)
-
-            VStack(spacing: 8) {
-                Image(systemName: "hammer")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text("Templates coming soon")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .opacity(mode == .template ? 1 : 0)
-            .allowsHitTesting(mode == .template)
         }
+        .opacity(mode == .clone ? 1 : 0)
+        .allowsHitTesting(mode == .clone)
     }
 
     // MARK: - State
@@ -1515,8 +1496,6 @@ private struct NewProjectSheet: View {
             true
         case .clone:
             !cloneURL.trimmingCharacters(in: .whitespaces).isEmpty && !isCloning
-        case .template:
-            false
         }
     }
 
@@ -1544,8 +1523,6 @@ private struct NewProjectSheet: View {
             createEmpty()
         case .clone:
             cloneRepo()
-        case .template:
-            break
         }
     }
 
