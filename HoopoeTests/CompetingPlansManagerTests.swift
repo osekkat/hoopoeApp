@@ -116,7 +116,7 @@ final class CompetingPlansManagerTests: XCTestCase {
         let failedResult = manager.results.first(where: { $0.providerID == "fail" })
         XCTAssertNotNil(failedResult)
         XCTAssertTrue(failedResult!.isFailed)
-        XCTAssertEqual(failedResult!.errorMessage, "Auth error")
+        XCTAssertEqual(failedResult!.errorMessage, "Server error: Auth error")
 
         // Verify successful providers
         let okResults = manager.results.filter(\.isComplete)

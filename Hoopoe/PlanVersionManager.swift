@@ -27,10 +27,11 @@ final class PlanVersionManager {
         description: String,
         provenance: VersionProvenance? = nil
     ) -> PlanVersion {
+        let nextRound = (plan.versions.map(\.roundNumber).max() ?? 0) + 1
         let version = PlanVersion(
             planId: plan.id,
             content: plan.content,
-            roundNumber: plan.versions.count + 1,
+            roundNumber: nextRound,
             changeDescription: description,
             provenance: provenance
         )

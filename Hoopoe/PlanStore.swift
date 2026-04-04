@@ -118,6 +118,19 @@ final class PlanStore {
         plan.updatedAt = Date()
         plan.filePath = mdURL
 
+        // Validate parent directory exists before coordinating (NSFileCoordinator
+        // can crash with SIGTRAP if the parent directory is absent).
+        let parentDir = mdURL.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: parentDir.path) {
+            restoreSaveState()
+            let storeError = PlanStoreError.saveFailed(
+                mdURL,
+                CocoaError(.fileNoSuchFile, userInfo: [NSURLErrorKey: parentDir])
+            )
+            lastError = storeError
+            throw storeError
+        }
+
         // Write markdown content using file coordination
         let coordinator = NSFileCoordinator()
         var coordinatorError: NSError?

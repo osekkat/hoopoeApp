@@ -224,6 +224,7 @@ struct DiffEngineTests {
 // MARK: - DiffViewerAppKit Tests (BUG FIX: NSSplitView.addArrangedSubview → addSubview)
 
 @Suite("DiffViewerAppKit")
+@MainActor
 struct DiffViewerAppKitTests {
     @Test("DiffViewerAppKit initializes with split view containing two panes")
     func viewHierarchyStructure() {

@@ -30,7 +30,10 @@ final class ConvergenceTracker {
 
     /// Returns the latest composite convergence score, or nil if fewer than 2 versions.
     func latestConvergenceScore(for plan: PlanDocument) -> Double? {
-        plan.latestConvergenceMetrics()?.compositeScore
+        if plan.needsConvergenceMetricsRefresh() {
+            plan.rebuildConvergenceMetrics()
+        }
+        return plan.latestConvergenceMetrics()?.compositeScore
     }
 
     /// Whether the plan has converged (latest score >= threshold).
